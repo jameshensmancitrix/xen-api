@@ -895,7 +895,7 @@ let vdi_copy_fun __context dbg vdi_map remote is_intra_pool remote_vdis so_far
     in
     try cont dp
     with e ->
-      ( try SMAPI.DP.destroy dbg dp false
+      ( try SMAPI.DP.destroy dbg dp false (Storage_interface.Vm.of_string "0")
         with _ -> info "Failed to cleanup datapath: %s" dp
       ) ;
       raise e
@@ -1485,6 +1485,7 @@ let migrate_send' ~__context ~vm ~dest ~live:_ ~vdi_map ~vif_map ~vgpu_map
             match mirror_record.mr_dp with
             | Some dp ->
                 SMAPI.DP.destroy dbg dp false
+                  (Storage_interface.Vm.of_string "0")
             | None ->
                 ()
         )

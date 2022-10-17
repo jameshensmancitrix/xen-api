@@ -140,8 +140,8 @@ val vbd_detach_order :
 val diagnostics : __context:Context.t -> string
 (** [diagnostics __context] returns a printable snapshot of SM system state *)
 
-val dp_destroy : __context:Context.t -> string -> bool -> unit
-(** [dp_destroy __context dp allow_leak] attempts to cleanup and detach a given DP *)
+val dp_destroy : __context:Context.t -> string -> bool -> domid:int -> unit
+(** [dp_destroy __context dp allow_leak domid] attempts to cleanup and detach a given DP *)
 
 val create_sr :
      __context:Context.t

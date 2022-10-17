@@ -533,7 +533,7 @@ module StorageAPI (R : RPC) = struct
         ; "This will typically do any needed VDI.detach, VDI.deactivate \
            cleanup."
         ]
-        (dbg_p @-> dp_p @-> allow_leak_p @-> returning unit_p err)
+        (dbg_p @-> dp_p @-> allow_leak_p @-> vm_p @-> returning unit_p err)
 
     let attach_info =
       let backend_p = Param.mk ~name:"backend" backend in
@@ -1102,7 +1102,8 @@ module type Server_impl = sig
   module DP : sig
     val create : context -> dbg:debug_info -> id:string -> dp
 
-    val destroy : context -> dbg:debug_info -> dp:dp -> allow_leak:bool -> unit
+    val destroy :
+      context -> dbg:debug_info -> dp:dp -> allow_leak:bool -> vm:vm -> unit
 
     val attach_info :
       context -> dbg:debug_info -> sr:sr -> vdi:vdi -> dp:dp -> backend
@@ -1403,8 +1404,8 @@ module Server (Impl : Server_impl) () = struct
     S.Query.query (fun dbg -> Impl.Query.query () ~dbg) ;
     S.Query.diagnostics (fun dbg -> Impl.Query.diagnostics () ~dbg) ;
     S.DP.create (fun dbg id -> Impl.DP.create () ~dbg ~id) ;
-    S.DP.destroy (fun dbg dp allow_leak ->
-        Impl.DP.destroy () ~dbg ~dp ~allow_leak
+    S.DP.destroy (fun dbg dp allow_leak vm ->
+        Impl.DP.destroy () ~dbg ~dp ~allow_leak ~vm
     ) ;
     S.DP.attach_info (fun dbg sr vdi dp ->
         Impl.DP.attach_info () ~dbg ~sr ~vdi ~dp

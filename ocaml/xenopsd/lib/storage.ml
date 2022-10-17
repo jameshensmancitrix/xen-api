@@ -86,14 +86,14 @@ let deactivate task dp sr vdi vmdomid =
      )
     )
 
-let dp_destroy task dp =
+let dp_destroy task vm dp =
   Xenops_task.with_subtask task
     (Printf.sprintf "DP.destroy %s" dp)
     (transform_exception (fun () ->
          let waiting_for_plugin = ref true in
          while !waiting_for_plugin do
            try
-             Client.DP.destroy "dp_destroy" dp false ;
+             Client.DP.destroy "dp_destroy" dp false vm ;
              waiting_for_plugin := false
            with
            | Storage_interface.Storage_error (No_storage_plugin_for_sr _sr) as e

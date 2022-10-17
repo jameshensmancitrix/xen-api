@@ -35,7 +35,7 @@ end
 module DP = struct
   let create ctx ~dbg ~id = u "DP.create"
 
-  let destroy ctx ~dbg ~dp ~allow_leak = u "DP.destroy"
+  let destroy ctx ~dbg ~dp ~allow_leak ~vm = u "DP.destroy"
 
   let attach_info ctx ~dbg ~sr ~vdi ~dp = u "DP.attach_info"
 

@@ -1765,7 +1765,8 @@ let deactivate_and_detach ~__context ~vbd ~domid =
           let module C = Storage_interface.StorageAPI (Idl.Exn.GenClient (struct
             let rpc = rpc
           end)) in
-          C.DP.destroy dbg dp false
+          let vm = Storage_interface.Vm.of_string (string_of_int domid) in
+          C.DP.destroy dbg dp false vm
       )
   )
 
@@ -1779,10 +1780,11 @@ let diagnostics ~__context =
     ; Client.Query.diagnostics dbg
     ]
 
-let dp_destroy ~__context dp allow_leak =
+let dp_destroy ~__context dp allow_leak ~domid =
   transform_storage_exn (fun () ->
       let dbg = Context.get_task_id __context in
-      Client.DP.destroy (Ref.string_of dbg) dp allow_leak
+      let vm = Storage_interface.Vm.of_string (string_of_int domid) in
+      Client.DP.destroy (Ref.string_of dbg) dp allow_leak vm
   )
 
 (* Set my PBD.currently_attached fields in the Pool database to match the local one *)
