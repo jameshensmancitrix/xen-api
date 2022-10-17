@@ -548,7 +548,15 @@ let with_disk ~xc ~xs task disk write f =
             )
             (fun () -> destroy_vbd_frontend ~xc ~xs task device)
         )
-        (fun () -> dp_destroy task dp)
+        (fun () ->
+          dp_destroy task
+            (this_domid ~xs
+            |> get_uuid ~xc
+            |> Uuidx.to_string
+            |> Storage_interface.Vm.of_string
+            )
+            dp
+        )
 
 module Mem = struct
   let wrap f =
@@ -1734,7 +1742,10 @@ module VM = struct
             (* Detach any remaining disks *)
             List.iter
               (fun dp ->
-                try Storage.dp_destroy task dp
+                try
+                  Storage.dp_destroy task
+                    (Storage_interface.Vm.of_string (string_of_int domid))
+                    dp
                 with e ->
                   warn "Ignoring exception in VM.destroy: %s"
                     (Printexc.to_string e)
@@ -3932,6 +3943,7 @@ module VBD = struct
               match (domid, backend) with
               | Some x, None | Some x, Some (VDI _) ->
                   Storage.dp_destroy task
+                    (Storage_interface.Vm.of_string (string_of_int x))
                     (Storage.id_of (string_of_int x) vbd.Vbd.id)
               | _ ->
                   ()
@@ -3974,6 +3986,7 @@ module VBD = struct
         safe_rm xs (vdi_path_of_device ~xs device) ;
         safe_rm xs (Device_common.backend_path_of_device ~xs device ^ "/sm-data") ;
         Storage.dp_destroy task
+          (Storage_interface.Vm.of_string vm)
           (Storage.id_of
              (string_of_int (frontend_domid_of_device device))
              vbd.Vbd.id

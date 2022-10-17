@@ -1302,7 +1302,7 @@ let get_thread_diagnostics ~__context ~host:_ =
   Locking_helpers.Thread_state.to_graphviz ()
 
 let sm_dp_destroy ~__context ~host:_ ~dp ~allow_leak =
-  Storage_access.dp_destroy ~__context dp allow_leak
+  Storage_access.dp_destroy ~__context dp allow_leak ~domid:0
 
 let get_diagnostic_timing_stats ~__context ~host:_ = Stats.summarise ()
 

@@ -911,7 +911,8 @@ functor
       (** [destroy_sr context dp sr allow_leak vdi_already_locked] attempts to free
         		    the resources associated with [dp] in [sr]. If [vdi_already_locked] then
         		    it is assumed that all VDIs are already locked. *)
-      let destroy_sr context ~dbg ~dp ~sr ~sr_t ~allow_leak vdi_already_locked =
+      let destroy_sr context ~dbg ~dp ~sr ~sr_t ~allow_leak vdi_already_locked
+          ~vm =
         (* Every VDI in use by this session should be detached and deactivated
            This code makes the assumption that a datapath is only on 0 or 1 VDIs. However, it retains debug code (identified below) to verify this.
            It also assumes that the VDIs associated with a datapath don't change during its execution - again it retains debug code to verify this.
@@ -962,7 +963,6 @@ functor
           | Some (vdi, _) ->
               locker vdi (fun () ->
                   try
-                    let vm = vm_of_s "" in
                     VDI.destroy_datapath_nolock context ~dbg ~dp ~sr ~vdi ~vm
                       ~allow_leak ;
                     None
@@ -1017,12 +1017,12 @@ functor
         ) ;
         failure
 
-      let destroy context ~dbg ~dp ~allow_leak =
+      let destroy context ~dbg ~dp ~allow_leak ~vm =
         info "DP.destroy dbg:%s dp:%s allow_leak:%b" dbg dp allow_leak ;
         let failures =
           Host.list !Host.host
           |> List.filter_map (fun (sr, sr_t) ->
-                 destroy_sr context ~dbg ~dp ~sr ~sr_t ~allow_leak false
+                 destroy_sr context ~dbg ~dp ~sr ~sr_t ~allow_leak false ~vm
              )
         in
         match (failures, allow_leak) with
@@ -1206,8 +1206,9 @@ functor
                     List.iter
                       (fun dp ->
                         let (_ : exn option) =
+                          let vm = vm_of_s "0" in
                           DP.destroy_sr context ~dbg ~dp ~sr ~sr_t
-                            ~allow_leak:false true
+                            ~allow_leak:false true ~vm
                         in
                         ()
                       )
