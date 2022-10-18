@@ -754,7 +754,7 @@ let bind ~volume_script_dir =
   let clone ~dbg ~sr ~vdi =
     return_volume_rpc (fun () -> Volume_client.clone volume_rpc dbg sr vdi)
   in
-  let destroy ~dbg ~sr ~vdi =
+  let destroy ~dbg ~sr ~vdi ~vm =
     return_volume_rpc (fun () -> Volume_client.destroy volume_rpc dbg sr vdi)
   in
   let set ~dbg ~sr ~vdi ~key ~value =
@@ -1159,7 +1159,7 @@ let bind ~volume_script_dir =
     |> wrap
   in
   S.VDI.create vdi_create_impl ;
-  let vdi_destroy_impl dbg sr vdi' =
+  let vdi_destroy_impl dbg sr vdi' vm' =
     (let vdi = Storage_interface.Vdi.string_of vdi' in
      Attached_SRs.find sr >>>= fun sr ->
      stat ~dbg ~sr ~vdi >>>= fun response ->
@@ -1172,9 +1172,9 @@ let bind ~volume_script_dir =
          return (Ok ())
      | Some _temporary ->
          (* Destroy the temporary disk we made earlier *)
-         destroy ~dbg ~sr ~vdi
+         destroy ~dbg ~sr ~vdi ~vm:vm'
      )
-     >>>= fun () -> destroy ~dbg ~sr ~vdi
+     >>>= fun () -> destroy ~dbg ~sr ~vdi ~vm:vm'
     )
     |> wrap
   in
@@ -1420,7 +1420,7 @@ let bind ~volume_script_dir =
            Deferred.Result.return ()
        | Some temporary ->
            (* Destroy the temporary disk we made earlier *)
-           destroy ~dbg ~sr ~vdi:temporary
+           destroy ~dbg ~sr ~vdi:temporary ~vm:vm'
        )
        >>>= fun () ->
        clone ~dbg ~sr ~vdi >>>= fun vdi' ->
@@ -1450,7 +1450,7 @@ let bind ~volume_script_dir =
            Deferred.Result.return ()
        | Some temporary ->
            (* Destroy the temporary disk we made earlier *)
-           destroy ~dbg ~sr ~vdi:temporary >>>= fun () ->
+           destroy ~dbg ~sr ~vdi:temporary ~vm:vm' >>>= fun () ->
            unset ~dbg ~sr ~vdi ~key:_clone_on_boot_key >>>= fun () ->
            Deferred.Result.return ()
     )
@@ -1674,7 +1674,9 @@ let self_test_plugin ~root_dir plugin =
             in
             Test.VDI.create rpc dbg sr vdi_info >>= fun vdi_info ->
             Test.VDI.stat rpc dbg sr vdi_info.vdi >>= fun _vdi_info ->
-            Test.VDI.destroy rpc dbg sr vdi_info.vdi >>= fun () ->
+            Test.VDI.destroy rpc dbg sr vdi_info.vdi
+              (Storage_interface.Vm.of_string "0")
+            >>= fun () ->
             Test.SR.stat rpc dbg sr >>= fun _sr_info ->
             Test.SR.scan rpc dbg sr >>= fun _sr_list ->
             if List.mem query_result.features "SR_PROBE" ~equal:String.equal

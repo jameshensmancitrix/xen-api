@@ -153,7 +153,11 @@ val create_sr :
 (** [create_sr __context sr name_label name_description physical_size] attempts to create an empty SR *)
 
 val destroy_sr :
-  __context:Context.t -> sr:API.ref_SR -> and_vdis:API.ref_VDI list -> unit
+     __context:Context.t
+  -> sr:API.ref_SR
+  -> and_vdis:API.ref_VDI list
+  -> domid:int
+  -> unit
 (** [destroy_sr __context sr] attempts to cleanup and destroy a given SR *)
 
 val event_wait :

@@ -282,11 +282,11 @@ module Mux = struct
       end)) in
       C.VDI.resize dbg sr vdi new_size
 
-    let destroy () ~dbg ~sr ~vdi =
+    let destroy () ~dbg ~sr ~vdi ~vm =
       let module C = StorageAPI (Idl.Exn.GenClient (struct
         let rpc = of_sr sr
       end)) in
-      C.VDI.destroy dbg sr vdi
+      C.VDI.destroy dbg sr vdi vm
 
     let stat () ~dbg ~sr ~vdi =
       let module C = StorageAPI (Idl.Exn.GenClient (struct
@@ -413,11 +413,11 @@ module Mux = struct
       end)) in
       C.VDI.disable_cbt dbg sr vdi
 
-    let data_destroy () ~dbg ~sr ~vdi =
+    let data_destroy () ~dbg ~sr ~vdi ~vm =
       let module C = StorageAPI (Idl.Exn.GenClient (struct
         let rpc = of_sr sr
       end)) in
-      C.VDI.data_destroy dbg sr vdi
+      C.VDI.data_destroy dbg sr vdi vm
 
     let list_changed_blocks () ~dbg ~sr ~vdi_from ~vdi_to =
       let module C = StorageAPI (Idl.Exn.GenClient (struct

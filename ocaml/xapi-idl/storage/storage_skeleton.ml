@@ -92,7 +92,7 @@ module VDI = struct
 
   let resize ctx ~dbg ~sr ~vdi ~new_size = u "VDI.resize"
 
-  let destroy ctx ~dbg ~sr ~vdi = u "VDI.destroy"
+  let destroy ctx ~dbg ~sr ~vdi ~vm = u "VDI.destroy"
 
   let stat ctx ~dbg ~sr ~vdi = u "VDI.stat"
 
@@ -137,7 +137,7 @@ module VDI = struct
 
   let disable_cbt ctx ~dbg ~sr ~vdi = u "VDI.disable_cbt"
 
-  let data_destroy ctx ~dbg ~sr ~vdi = u "VDI.data_destroy"
+  let data_destroy ctx ~dbg ~sr ~vdi ~vm = u "VDI.data_destroy"
 
   let list_changed_blocks ctx ~dbg ~sr ~vdi_from ~vdi_to =
     u "VDI.list_changed_blocks"

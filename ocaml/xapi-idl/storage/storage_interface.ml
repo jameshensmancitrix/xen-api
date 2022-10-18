@@ -752,7 +752,7 @@ module StorageAPI (R : RPC) = struct
     (** [destroy task sr vdi] removes [vdi] from [sr] *)
     let destroy =
       declare "VDI.destroy" []
-        (dbg_p @-> sr_p @-> vdi_p @-> returning unit_p err)
+        (dbg_p @-> sr_p @-> vdi_p @-> vm_p @-> returning unit_p err)
 
     (** [stat dbg sr vdi] returns information about VDI [vdi] in SR [sr] *)
     let stat =
@@ -942,7 +942,7 @@ module StorageAPI (R : RPC) = struct
         deleting its changed block tracking metadata *)
     let data_destroy =
       declare "VDI.data_destroy" []
-        (dbg_p @-> sr_p @-> vdi_p @-> returning unit_p err)
+        (dbg_p @-> sr_p @-> vdi_p @-> vm_p @-> returning unit_p err)
 
     (** [list_changed_blocks dbg sr vdi_from vdi_to] returns the blocks that
         have changed between [vdi_from] and [vdi_to] as a base64-encoded bitmap
@@ -1208,7 +1208,7 @@ module type Server_impl = sig
     val resize :
       context -> dbg:debug_info -> sr:sr -> vdi:vdi -> new_size:int64 -> int64
 
-    val destroy : context -> dbg:debug_info -> sr:sr -> vdi:vdi -> unit
+    val destroy : context -> dbg:debug_info -> sr:sr -> vdi:vdi -> vm:vm -> unit
 
     val stat : context -> dbg:debug_info -> sr:sr -> vdi:vdi -> vdi_info
 
@@ -1311,7 +1311,8 @@ module type Server_impl = sig
 
     val disable_cbt : context -> dbg:debug_info -> sr:sr -> vdi:vdi -> unit
 
-    val data_destroy : context -> dbg:debug_info -> sr:sr -> vdi:vdi -> unit
+    val data_destroy :
+      context -> dbg:debug_info -> sr:sr -> vdi:vdi -> vm:vm -> unit
 
     val list_changed_blocks :
       context -> dbg:debug_info -> sr:sr -> vdi_from:vdi -> vdi_to:vdi -> string
@@ -1458,7 +1459,7 @@ module Server (Impl : Server_impl) () = struct
     S.VDI.resize (fun dbg sr vdi new_size ->
         Impl.VDI.resize () ~dbg ~sr ~vdi ~new_size
     ) ;
-    S.VDI.destroy (fun dbg sr vdi -> Impl.VDI.destroy () ~dbg ~sr ~vdi) ;
+    S.VDI.destroy (fun dbg sr vdi vm -> Impl.VDI.destroy () ~dbg ~sr ~vdi ~vm) ;
     S.VDI.stat (fun dbg sr vdi -> Impl.VDI.stat () ~dbg ~sr ~vdi) ;
     S.VDI.introduce (fun dbg sr uuid sm_config location ->
         Impl.VDI.introduce () ~dbg ~sr ~uuid ~sm_config ~location
@@ -1510,7 +1511,9 @@ module Server (Impl : Server_impl) () = struct
     ) ;
     S.VDI.enable_cbt (fun dbg sr vdi -> Impl.VDI.enable_cbt () ~dbg ~sr ~vdi) ;
     S.VDI.disable_cbt (fun dbg sr vdi -> Impl.VDI.disable_cbt () ~dbg ~sr ~vdi) ;
-    S.VDI.data_destroy (fun dbg sr vdi -> Impl.VDI.data_destroy () ~dbg ~sr ~vdi) ;
+    S.VDI.data_destroy (fun dbg sr vdi vm ->
+        Impl.VDI.data_destroy () ~dbg ~sr ~vdi ~vm
+    ) ;
     S.VDI.list_changed_blocks (fun dbg sr vdi_from vdi_to ->
         Impl.VDI.list_changed_blocks () ~dbg ~sr ~vdi_from ~vdi_to
     ) ;

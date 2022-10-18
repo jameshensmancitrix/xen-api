@@ -601,7 +601,8 @@ let stop ~dbg ~id =
           let local_vdi = remove_from_sm_config local_vdi "base_mirror" in
           (* Disable mirroring on the local machine *)
           let snapshot = Local.VDI.snapshot dbg sr local_vdi in
-          Local.VDI.destroy dbg sr snapshot.vdi ;
+          Local.VDI.destroy dbg sr snapshot.vdi
+            (Storage_interface.Vm.of_string "0") ;
           (* Destroy the snapshot, if it still exists *)
           let snap =
             try
@@ -619,7 +620,7 @@ let stop ~dbg ~id =
           | Some s ->
               debug "Found snapshot VDI: %s"
                 (Storage_interface.Vdi.string_of s.vdi) ;
-              Local.VDI.destroy dbg sr s.vdi
+              Local.VDI.destroy dbg sr s.vdi (Storage_interface.Vm.of_string "0")
           | None ->
               debug "Snapshot VDI already cleaned up"
           ) ;
@@ -786,7 +787,12 @@ let start' ~task ~dbg ~sr ~vdi ~dp ~url ~dest =
       "mirror.start: snapshot created, mirror initiated vdi:%s snapshot_of:%s"
       (Storage_interface.Vdi.string_of snapshot.vdi)
       (Storage_interface.Vdi.string_of local_vdi.vdi) ;
-    on_fail := (fun () -> Local.VDI.destroy dbg sr snapshot.vdi) :: !on_fail ;
+    on_fail :=
+      (fun () ->
+        Local.VDI.destroy dbg sr snapshot.vdi
+          (Storage_interface.Vm.of_string "0")
+      )
+      :: !on_fail ;
     (let rec inner () =
        let alm_opt = State.find_active_local_mirror id in
        match alm_opt with
@@ -826,9 +832,10 @@ let start' ~task ~dbg ~sr ~vdi ~dp ~url ~dest =
       (Storage_interface.Vdi.string_of local_vdi.vdi)
       (Storage_interface.Vdi.string_of result.Mirror.mirror_vdi.vdi) ;
     debug "Destroying dummy VDI on remote" ;
-    Remote.VDI.destroy dbg dest result.Mirror.dummy_vdi ;
+    Remote.VDI.destroy dbg dest result.Mirror.dummy_vdi
+      (Storage_interface.Vm.of_string "0") ;
     debug "Destroying snapshot on src" ;
-    Local.VDI.destroy dbg sr snapshot.vdi ;
+    Local.VDI.destroy dbg sr snapshot.vdi (Storage_interface.Vm.of_string "0") ;
     Some (Mirror_id id)
   with
   | Storage_error (Sr_not_attached sr_uuid) ->
@@ -957,6 +964,7 @@ let killall ~dbg =
         ; (fun () ->
             Remote.VDI.destroy dbg copy_state.State.Copy_state.dest_sr
               copy_state.State.Copy_state.copy_vdi
+              (Storage_interface.Vm.of_string "0")
           )
         ]
     )
@@ -979,9 +987,17 @@ let receive_start ~dbg ~sr ~vdi_info ~id ~similar =
     let vdi_info = {vdi_info with sm_config= [("base_mirror", id)]} in
     let leaf = Local.VDI.create dbg sr vdi_info in
     info "Created leaf VDI for mirror receive: %s" (string_of_vdi_info leaf) ;
-    on_fail := (fun () -> Local.VDI.destroy dbg sr leaf.vdi) :: !on_fail ;
+    on_fail :=
+      (fun () ->
+        Local.VDI.destroy dbg sr leaf.vdi (Storage_interface.Vm.of_string "0")
+      )
+      :: !on_fail ;
     let dummy = Local.VDI.snapshot dbg sr leaf in
-    on_fail := (fun () -> Local.VDI.destroy dbg sr dummy.vdi) :: !on_fail ;
+    on_fail :=
+      (fun () ->
+        Local.VDI.destroy dbg sr dummy.vdi (Storage_interface.Vm.of_string "0")
+      )
+      :: !on_fail ;
     debug "Created dummy snapshot for mirror receive: %s"
       (string_of_vdi_info dummy) ;
     let _ = Local.VDI.attach3 dbg leaf_dp sr leaf.vdi (vm_of_s "0") true in
@@ -1086,7 +1102,11 @@ let receive_cancel ~dbg ~id =
             (Storage_interface.Vm.of_string "0")
       ) ;
       List.iter
-        (fun v -> log_and_ignore_exn (fun () -> Local.VDI.destroy dbg r.sr v))
+        (fun v ->
+          log_and_ignore_exn (fun () ->
+              Local.VDI.destroy dbg r.sr v (Storage_interface.Vm.of_string "0")
+          )
+        )
         [r.dummy_vdi; r.leaf_vdi; r.parent_vdi]
     )
     receive_state ;
@@ -1286,7 +1306,8 @@ let copy ~task ~dbg ~sr ~vdi ~dp:_ ~url ~dest =
         |> vdi_info
       in
       let snapshot = Remote.VDI.snapshot dbg dest remote_copy in
-      Remote.VDI.destroy dbg dest remote_copy.vdi ;
+      Remote.VDI.destroy dbg dest remote_copy.vdi
+        (Storage_interface.Vm.of_string "0") ;
       Some (Vdi_info snapshot)
     with e ->
       error "Caught %s: copying snapshots vdi" (Printexc.to_string e) ;

@@ -820,7 +820,7 @@ module SMAPIv1 = struct
       | Sm.MasterOnly ->
           redirect sr
 
-    let destroy _context ~dbg ~sr ~vdi =
+    let destroy _context ~dbg ~sr ~vdi ~vm =
       try
         for_vdi ~dbg ~sr ~vdi "VDI.destroy" (fun device_config _type sr self ->
             Sm.vdi_delete device_config _type sr self
@@ -1121,7 +1121,7 @@ module SMAPIv1 = struct
     let disable_cbt context =
       call_cbt_function context ~f:Sm.vdi_disable_cbt ~f_name:"VDI.disable_cbt"
 
-    let data_destroy context ~dbg ~sr ~vdi =
+    let data_destroy context ~dbg ~sr ~vdi ~vm:_ =
       call_cbt_function context ~f:Sm.vdi_data_destroy
         ~f_name:"VDI.data_destroy" ~dbg ~sr ~vdi ;
       set_content_id context ~dbg ~sr ~vdi
@@ -1971,7 +1971,7 @@ let create_sr ~__context ~sr ~name_label ~name_description ~physical_size =
 
 (* This is because the current backends want SR.attached <=> PBD.currently_attached=true.
    It would be better not to plug in the PBD, so that other API calls will be blocked. *)
-let destroy_sr ~__context ~sr ~and_vdis =
+let destroy_sr ~__context ~sr ~and_vdis ~domid =
   transform_storage_exn (fun () ->
       let pbd, pbd_t = Sm.get_my_pbd_for_sr __context sr in
       let (_ : query_result) = bind ~__context ~pbd in
@@ -1991,6 +1991,7 @@ let destroy_sr ~__context ~sr ~and_vdis =
                 Client.VDI.destroy dbg
                   (Storage_interface.Sr.of_string sr_uuid)
                   (Storage_interface.Vdi.of_string location)
+                  (Storage_interface.Vm.of_string (string_of_int domid))
               )
               and_vdis ;
             Client.SR.destroy dbg (Storage_interface.Sr.of_string sr_uuid)

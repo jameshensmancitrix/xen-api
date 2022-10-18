@@ -379,8 +379,9 @@ let vdi_resize common_opts sr vdi new_size =
     )
     common_opts sr vdi
 
-let vdi_destroy common_opts sr vdi =
-  on_vdi' (fun sr vdi -> Client.VDI.destroy dbg sr vdi) common_opts sr vdi
+let vdi_destroy common_opts sr vdi vm =
+  let vm = Vm.of_string vm in
+  on_vdi' (fun sr vdi -> Client.VDI.destroy dbg sr vdi vm) common_opts sr vdi
 
 let vdi_attach common_opts sr vdi =
   on_vdi'
@@ -434,8 +435,11 @@ let vdi_enable_cbt common_opts sr vdi =
 let vdi_disable_cbt common_opts sr vdi =
   on_vdi' (fun sr vdi -> Client.VDI.disable_cbt dbg sr vdi) common_opts sr vdi
 
-let vdi_data_destroy common_opts sr vdi =
-  on_vdi' (fun sr vdi -> Client.VDI.data_destroy dbg sr vdi) common_opts sr vdi
+let vdi_data_destroy common_opts sr vdi vm =
+  let vm = Vm.of_string vm in
+  on_vdi'
+    (fun sr vdi -> Client.VDI.data_destroy dbg sr vdi vm)
+    common_opts sr vdi
 
 let vdi_list_changed_blocks common_opts sr vdi_from vdi_to =
   on_vdi'
@@ -765,7 +769,7 @@ let vdi_destroy_cmd =
     ]
     @ help
   in
-  ( Term.(ret (const vdi_destroy $ common_options_t $ sr_arg $ vdi_arg))
+  ( Term.(ret (const vdi_destroy $ common_options_t $ sr_arg $ vdi_arg $ vm_arg))
   , Cmd.info "vdi-destroy" ~sdocs:_common_options ~doc ~man
   )
 
@@ -890,7 +894,9 @@ let vdi_data_destroy_cmd =
     ]
     @ help
   in
-  ( Term.(ret (const vdi_data_destroy $ common_options_t $ sr_arg $ vdi_arg))
+  ( Term.(
+      ret (const vdi_data_destroy $ common_options_t $ sr_arg $ vdi_arg $ vm_arg)
+    )
   , Cmd.info "vdi-data-destroy" ~sdocs:_common_options ~doc ~man
   )
 

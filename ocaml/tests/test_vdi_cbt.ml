@@ -449,7 +449,7 @@ let test_get_nbd_info =
     and returns a CBT-enabled snapshot VDI on which it is allowed to run
     data_destroy. *)
 let setup_test_for_data_destroy
-    ?(vdi_data_destroy = fun _ ~dbg:_ ~sr:_ ~vdi:_ -> ()) () =
+    ?(vdi_data_destroy = fun _ ~dbg:_ ~sr:_ ~vdi:_ ~vm:_ -> ()) () =
   (* data_destroy uses the event mechanism, this is required to make the unit test work *)
   let __context, _ = Test_event.event_setup_common () in
   let sR = make_mock_server_infrastructure ~__context in
@@ -464,7 +464,7 @@ let setup_test_for_data_destroy
 let test_allowed_operations_updated_when_necessary () =
   let __context, sR, self = setup_test_for_data_destroy () in
   register_smapiv2_server
-    ~vdi_data_destroy:(fun _ ~dbg:_ ~sr:_ ~vdi:_ -> ())
+    ~vdi_data_destroy:(fun _ ~dbg:_ ~sr:_ ~vdi:_ ~vm:_ -> ())
     (Db.SR.get_uuid ~__context ~self:sR |> Storage_interface.Sr.of_string) ;
   let assert_allowed_operations msg check =
     Alcotest.(check bool)
