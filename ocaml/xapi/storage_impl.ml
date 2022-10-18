@@ -776,7 +776,34 @@ functor
       let destroy_and_data_destroy call_name call_f context ~dbg ~sr ~vdi =
         info "%s dbg:%s sr:%s vdi:%s" call_name dbg (s_of_sr sr) (s_of_vdi vdi) ;
         with_vdi sr vdi (fun () ->
-            let vm = vm_of_s "" in
+            let __context = Context.make "storage_impl" in
+            let vbds =
+              try
+                Db.VDI.get_VBDs ~__context
+                  ~self:(Ref.of_string (Storage_interface.Vdi.string_of vdi))
+              with _ -> []
+            in
+            let _vm =
+              match vbds with
+              | [vbd] ->
+                  Db.VBD.get_VM ~__context ~self:vbd
+              | _ ->
+                  Ref.of_string ""
+              (* raise
+                 (Storage_interface.Storage_error
+                    (Backend_error
+                       ( Api_errors.internal_error
+                       , [
+                           Printf.sprintf
+                             "Expected 1 VBD attached to VDI, had %d"
+                             (List.length vbds)
+                         ]
+                       )
+                    )
+                 ) *)
+            in
+
+            let vm = Storage_interface.Vm.of_string (Ref.string_of _vm) in
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.all
               (fun () -> call_f context ~dbg ~sr ~vdi
             )
