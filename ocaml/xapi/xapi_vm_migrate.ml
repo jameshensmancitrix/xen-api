@@ -796,7 +796,7 @@ let vdi_filter __context allow_mirror vbd =
     Some (get_vdi_mirror __context vm vdi do_mirror)
 
 let vdi_copy_fun __context dbg vdi_map remote is_intra_pool remote_vdis so_far
-    total_size copy vconf continuation =
+    total_size copy vmdomid vconf continuation =
   TaskHelper.exn_if_cancelling ~__context ;
   let dest_sr_ref = List.assoc vconf.vdi vdi_map in
   let dest_sr_uuid =
@@ -895,7 +895,7 @@ let vdi_copy_fun __context dbg vdi_map remote is_intra_pool remote_vdis so_far
     in
     try cont dp
     with e ->
-      ( try SMAPI.DP.destroy dbg dp false (Storage_interface.Vm.of_string "0")
+      ( try SMAPI.DP.destroy dbg dp false vmdomid
         with _ -> info "Failed to cleanup datapath: %s" dp
       ) ;
       raise e
@@ -1353,10 +1353,14 @@ let migrate_send' ~__context ~vm ~dest ~live:_ ~vdi_map ~vif_map ~vgpu_map
       List.fold_left (fun acc vconf -> Int64.add acc vconf.size) 0L all_vdis
     in
     let so_far = ref 0L in
+    let vmdomid =
+      Storage_interface.Vm.of_string
+        (Int64.to_string (Db.VM.get_domid ~__context ~self:vm))
+    in
     let new_vm =
       with_many
         (vdi_copy_fun __context dbg vdi_map remote is_intra_pool remote_vdis
-           so_far total_size copy
+           so_far total_size copy vmdomid
         )
         all_vdis
       @@ fun all_map ->
@@ -1478,6 +1482,7 @@ let migrate_send' ~__context ~vm ~dest ~live:_ ~vdi_map ~vif_map ~vgpu_map
           )
           vifs
       in
+      let domid = Db.VM.get_domid ~__context ~self:vm in
       (* Destroy the local datapaths - this allows the VDIs to properly detach, invoking the migrate_finalize calls *)
       List.iter
         (fun mirror_record ->
@@ -1485,7 +1490,7 @@ let migrate_send' ~__context ~vm ~dest ~live:_ ~vdi_map ~vif_map ~vgpu_map
             match mirror_record.mr_dp with
             | Some dp ->
                 SMAPI.DP.destroy dbg dp false
-                  (Storage_interface.Vm.of_string "0")
+                  (Storage_interface.Vm.of_string (Int64.to_string domid))
             | None ->
                 ()
         )

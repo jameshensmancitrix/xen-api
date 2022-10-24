@@ -26,6 +26,8 @@ open Storage_interface
 open Storage_task
 open Storage_utils
 
+let unknown_domid = "0"
+
 let vm_of_s = Storage_interface.Vm.of_string
 
 let local_url () =
@@ -494,6 +496,7 @@ let copy' ~task ~dbg ~sr ~vdi ~url ~dest ~dest_vdi =
       None
   in
   try
+    (* FIXME: SMAPIv3 storage migration not implemented, what value to use for domid here? *)
     let remote_dp = Uuidx.(to_string (make ())) in
     let base_dp = Uuidx.(to_string (make ())) in
     let leaf_dp = Uuidx.(to_string (make ())) in
@@ -551,8 +554,7 @@ let copy' ~task ~dbg ~sr ~vdi ~url ~dest ~dest_vdi =
         )
       )
       (fun () ->
-        Remote.DP.destroy dbg remote_dp false
-          (Storage_interface.Vm.of_string "0") ;
+        Remote.DP.destroy dbg remote_dp false (vm_of_s unknown_domid) ;
         State.remove_copy id
       ) ;
     SMPERF.debug "mirror.copy: copy complete" ;
@@ -923,7 +925,7 @@ let killall ~dbg =
           (fun () -> stop ~dbg ~id)
         ; (fun () ->
             Local.DP.destroy dbg send_state.State.Send_state.local_dp true
-              (Storage_interface.Vm.of_string "0")
+              (vm_of_s unknown_domid)
           )
         ]
     )
@@ -935,11 +937,11 @@ let killall ~dbg =
         [
           (fun () ->
             Local.DP.destroy dbg copy_state.State.Copy_state.leaf_dp true
-              (Storage_interface.Vm.of_string "0")
+              (vm_of_s unknown_domid)
           )
         ; (fun () ->
             Local.DP.destroy dbg copy_state.State.Copy_state.base_dp true
-              (Storage_interface.Vm.of_string "0")
+              (vm_of_s unknown_domid)
           )
         ] ;
       let remote_url =
@@ -952,7 +954,7 @@ let killall ~dbg =
         [
           (fun () ->
             Remote.DP.destroy dbg copy_state.State.Copy_state.remote_dp true
-              (Storage_interface.Vm.of_string "0")
+              (vm_of_s unknown_domid)
           )
         ; (fun () ->
             Remote.VDI.destroy dbg copy_state.State.Copy_state.dest_sr
@@ -1070,9 +1072,7 @@ let receive_finalize ~dbg ~id =
   let recv_state = State.find_active_receive_mirror id in
   let open State.Receive_state in
   Option.iter
-    (fun r ->
-      Local.DP.destroy dbg r.leaf_dp false (Storage_interface.Vm.of_string "0")
-    )
+    (fun r -> Local.DP.destroy dbg r.leaf_dp false (vm_of_s unknown_domid))
     recv_state ;
   State.remove_receive_mirror id
 
@@ -1082,8 +1082,7 @@ let receive_cancel ~dbg ~id =
   Option.iter
     (fun r ->
       log_and_ignore_exn (fun () ->
-          Local.DP.destroy dbg r.leaf_dp false
-            (Storage_interface.Vm.of_string "0")
+          Local.DP.destroy dbg r.leaf_dp false (vm_of_s unknown_domid)
       ) ;
       List.iter
         (fun v -> log_and_ignore_exn (fun () -> Local.VDI.destroy dbg r.sr v))

@@ -520,6 +520,7 @@ let with_disk ~xc ~xs task disk write f =
   | VDI path ->
       let open Storage in
       let sr, vdi = get_disk_by_name task path in
+      let vmdomid = Storage.vm_of_domid (Some (this_domid ~xs)) in
       let dp =
         Client.DP.create "with_disk"
           (Printf.sprintf "xenopsd/task/%s" (Xenops_task.id_of_handle task))
@@ -548,15 +549,7 @@ let with_disk ~xc ~xs task disk write f =
             )
             (fun () -> destroy_vbd_frontend ~xc ~xs task device)
         )
-        (fun () ->
-          dp_destroy task
-            (this_domid ~xs
-            |> get_uuid ~xc
-            |> Uuidx.to_string
-            |> Storage_interface.Vm.of_string
-            )
-            dp
-        )
+        (fun () -> dp_destroy task vmdomid dp)
 
 module Mem = struct
   let wrap f =
@@ -1714,11 +1707,7 @@ module VM = struct
                 )
                 devices
             in
-            let dps =
-              List.map
-                (fun device -> Device.Generic.get_private_key ~xs device _dp_id)
-                vbds
-            in
+
             (* Normally we throw-away our domain-level information. If the
                domain has suspended then we preserve it. *)
             if
@@ -1740,12 +1729,15 @@ module VM = struct
             Domain.destroy task ~xc ~xs ~qemu_domid ~vtpm:(vtpm_of ~vm)
               ~dm:(dm_of ~vm) domid ;
             (* Detach any remaining disks *)
+            let dps =
+              List.map
+                (fun device -> Device.Generic.get_private_key ~xs device _dp_id)
+                vbds
+            in
             List.iter
               (fun dp ->
                 try
-                  Storage.dp_destroy task
-                    (Storage_interface.Vm.of_string (string_of_int domid))
-                    dp
+                  Storage.dp_destroy task (Storage.vm_of_domid (Some domid)) dp
                 with e ->
                   warn "Ignoring exception in VM.destroy: %s"
                     (Printexc.to_string e)
@@ -3943,7 +3935,7 @@ module VBD = struct
               match (domid, backend) with
               | Some x, None | Some x, Some (VDI _) ->
                   Storage.dp_destroy task
-                    (Storage_interface.Vm.of_string (string_of_int x))
+                    (Storage.vm_of_domid domid)
                     (Storage.id_of (string_of_int x) vbd.Vbd.id)
               | _ ->
                   ()
@@ -3978,15 +3970,16 @@ module VBD = struct
 
   let eject task vm vbd =
     on_frontend
-      (fun xc xs _ _ ->
+      (fun xc xs frontend_domid _ ->
         let (device : Device_common.device) =
           device_by_id xc xs vm (device_kind_of ~xs vbd) (id_of vbd)
         in
+
         Device.Vbd.media_eject ~xs ~dm:(dm_of ~vm) device ;
         safe_rm xs (vdi_path_of_device ~xs device) ;
         safe_rm xs (Device_common.backend_path_of_device ~xs device ^ "/sm-data") ;
         Storage.dp_destroy task
-          (Storage_interface.Vm.of_string vm)
+          (Storage.vm_of_domid (Some frontend_domid))
           (Storage.id_of
              (string_of_int (frontend_domid_of_device device))
              vbd.Vbd.id

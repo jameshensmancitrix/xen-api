@@ -1718,7 +1718,6 @@ let on_vdi ~__context ~vbd ~domid f =
   let module C = Storage_interface.StorageAPI (Idl.Exn.GenClient (struct
     let rpc = rpc
   end)) in
-  let dp = C.DP.create dbg dp in
   transform_storage_exn (fun () -> f rpc dbg dp sr vdi)
 
 let reset ~__context ~vm =
