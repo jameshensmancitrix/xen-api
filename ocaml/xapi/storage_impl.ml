@@ -576,7 +576,8 @@ functor
               (Sr.find vdi sr_t)
 
       (* Attempt to clear leaked datapaths associed with this vdi *)
-      let remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ?vm which next =
+      let remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ?vm which next
+          ~fail_on_leaked =
         let dpv =
           match Host.find sr !Host.host with
           | None ->
@@ -590,18 +591,29 @@ functor
           )
         in
         let failures =
-          List.fold_left
-            (fun acc (dp, vm') ->
-              info "Attempting to destroy datapath dp:%s sr:%s vdi:%s" dp
-                (s_of_sr sr) (s_of_vdi vdi) ;
-              try
-                let vm = match vm with None -> vm' | Some vm -> vm in
-                destroy_datapath_nolock context ~dbg ~dp ~sr ~vdi ~vm
-                  ~allow_leak:false ;
-                acc
-              with e -> e :: acc
-            )
-            [] dpv
+          if fail_on_leaked && dpv <> [] then
+            [
+              Storage_error
+                (Internal_error
+                   (Printf.sprintf
+                      "sr: %s vdi: %s leaked datapaths are not allowed"
+                      (s_of_sr sr) (s_of_vdi vdi)
+                   )
+                )
+            ]
+          else
+            List.fold_left
+              (fun acc (dp, vm') ->
+                info "Attempting to destroy datapath dp:%s sr:%s vdi:%s" dp
+                  (s_of_sr sr) (s_of_vdi vdi) ;
+                try
+                  let vm = match vm with None -> vm' | Some vm -> vm in
+                  destroy_datapath_nolock context ~dbg ~dp ~sr ~vdi ~vm
+                    ~allow_leak:false ;
+                  acc
+                with e -> e :: acc
+              )
+              [] dpv
         in
         match failures with [] -> next () | f :: _ -> raise f
 
@@ -610,7 +622,7 @@ functor
           (s_of_sr sr) (s_of_vdi vdi) (s_of_vm vm) persistent ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () ->
+              ~fail_on_leaked:false (fun () ->
                 Impl.VDI.epoch_begin context ~dbg ~sr ~vdi ~vm ~persistent
             )
         )
@@ -620,7 +632,7 @@ functor
           (s_of_sr sr) (s_of_vdi vdi) (s_of_vm vm) read_write ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () ->
+              ~fail_on_leaked:false (fun () ->
                 let state =
                   perform_nolock context ~dbg ~dp ~sr ~vdi ~vm
                     (Vdi_automaton.Attach
@@ -690,7 +702,7 @@ functor
           (s_of_vdi vdi) (s_of_vm vm) ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () ->
+              ~fail_on_leaked:false (fun () ->
                 ignore
                   (perform_nolock context ~dbg ~dp ~sr ~vdi ~vm
                      Vdi_automaton.Activate
@@ -710,7 +722,7 @@ functor
           (s_of_sr sr) (s_of_vdi vdi) (s_of_vm vm) ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () ->
+              ~fail_on_leaked:false (fun () ->
                 ignore
                   (perform_nolock context ~dbg ~dp ~sr ~vdi ~vm
                      Vdi_automaton.Deactivate
@@ -723,7 +735,7 @@ functor
           (s_of_vdi vdi) (s_of_vm vm) ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () ->
+              ~fail_on_leaked:false (fun () ->
                 ignore
                   (perform_nolock context ~dbg ~dp ~sr ~vdi ~vm
                      Vdi_automaton.Detach
@@ -736,7 +748,8 @@ functor
           (s_of_vdi vdi) (s_of_vm vm) ;
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi ~vm Vdi.leaked
-              (fun () -> Impl.VDI.epoch_end context ~dbg ~sr ~vdi ~vm
+              ~fail_on_leaked:false (fun () ->
+                Impl.VDI.epoch_end context ~dbg ~sr ~vdi ~vm
             )
         )
 
@@ -798,10 +811,10 @@ functor
 
       let destroy_and_data_destroy call_name call_f context ~dbg ~sr ~vdi =
         info "%s dbg:%s sr:%s vdi:%s" call_name dbg (s_of_sr sr) (s_of_vdi vdi) ;
-
+        let fail_on_leaked = !Xapi_globs.fail_on_leaked in
         with_vdi sr vdi (fun () ->
             remove_datapaths_andthen_nolock context ~dbg ~sr ~vdi Vdi.all
-              (fun () -> call_f context ~dbg ~sr ~vdi
+              ~fail_on_leaked (fun () -> call_f context ~dbg ~sr ~vdi
             )
         )
 

@@ -974,6 +974,8 @@ let conn_limit_unix = ref 1024
 
 let conn_limit_clientcert = ref 800
 
+let fail_on_leaked = ref false
+
 let xapi_globs_spec =
   [
     ( "master_connection_reset_timeout"
@@ -1394,6 +1396,12 @@ let other_options =
     , Arg.Set ignore_vtpm_unimplemented
     , (fun () -> string_of_bool !ignore_vtpm_unimplemented)
     , "Do not raise errors on use-cases where VTPM codepaths are not finished."
+    )
+  ; ( "fail-on-leaked"
+    , Arg.Set fail_on_leaked
+    , (fun () -> string_of_bool !fail_on_leaked)
+    , "Raise an error if there is a leaked datapath in VDI.Destroy it defaults \
+       to false"
     )
   ]
 
