@@ -69,14 +69,14 @@ module Identifier = struct
       | Passthrough ->
           "passthrough"
       | Nvidia nvidia_id ->
-          Printf.sprintf "nvidia,%04x,%s,%04x,%04x" nvidia_id.pdev_id
+          Printf.sprintf "nvidia,%04x,%s,%04x,%04x,%B" nvidia_id.pdev_id
             ( match nvidia_id.psubdev_id with
             | Some id ->
                 Printf.sprintf "%04x" id
             | None ->
                 ""
             )
-            nvidia_id.vdev_id nvidia_id.vsubdev_id
+            nvidia_id.vdev_id nvidia_id.vsubdev_id nvidia_id.sriov
       | GVT_g gvt_g_id ->
           Printf.sprintf "gvt-g,%04x,%Lx,%Lx,%Lx" gvt_g_id.pdev_id
             gvt_g_id.low_gm_sz gvt_g_id.high_gm_sz gvt_g_id.fence_sz
@@ -85,6 +85,38 @@ module Identifier = struct
             mxgpu_id.framebufferbytes
     in
     Printf.sprintf "%04d:%s" version data
+
+  let of_string str =
+    try
+      let data = String.split_on_char ':' str |> List.tl |> List.hd in
+      match String.split_on_char ',' data with
+      | ["nvidia"; pdev_id; psubdev_id; vdev_id; vsubdev_id;sriov] ->
+          let pdev_id = int_of_string ("0x" ^ pdev_id) in
+          let vdev_id = int_of_string ("0x" ^ vdev_id) in
+          let vsubdev_id = int_of_string ("0x" ^ vsubdev_id) in
+          let psubdev_id =
+            if psubdev_id = "" then
+              None
+            else
+              Some (int_of_string ("0x" ^ psubdev_id))
+          in
+          let sriov = bool_of_string sriov in
+          Nvidia {pdev_id; psubdev_id; vdev_id; vsubdev_id; sriov}
+      | ["gvt-g"; pdev_id; low_gm_sz; high_gm_sz; fence_sz] ->
+          let pdev_id = int_of_string ("0x" ^ pdev_id) in
+          let low_gm_sz = Int64.of_string ("0x" ^ low_gm_sz) in
+          let high_gm_sz = Int64.of_string ("0x" ^ high_gm_sz) in
+          let fence_sz = Int64.of_string ("0x" ^ fence_sz) in
+          GVT_g {pdev_id; low_gm_sz; high_gm_sz; fence_sz}
+      | ["mxgpu"; pdev_id; framebufferbytes] ->
+          let pdev_id = int_of_string ("0x" ^ pdev_id) in
+          let framebufferbytes = Int64.of_string ("0x" ^ framebufferbytes) in
+          MxGPU {pdev_id; framebufferbytes}
+      | ["passthrough"] ->
+          Passthrough
+      | _ ->
+          failwith (Printf.sprintf "Error: Cannot parse Identifier string:%s passed to function" str)
+    with _ -> failwith (Printf.sprintf "Error: Invalid Identifier string:%s passed to function" str)
 
   let to_implementation : t -> API.vgpu_type_implementation = function
     | Passthrough ->
@@ -129,6 +161,71 @@ let passthrough_gpu =
   ; compatible_model_names_in_vm= []
   ; compatible_model_names_on_pgpu= []
   }
+
+let compatibility_match_in_vm (vgpu_type1 : API.vGPU_type_t)
+    (vgpu_type2 : API.vGPU_type_t) =
+  let vgpu_type1_id = Identifier.of_string vgpu_type1.vGPU_type_identifier in
+  let vgpu_type2_id = Identifier.of_string vgpu_type2.vGPU_type_identifier in
+  let compare_vgpu_in_vm (vgpu_type1 : API.vGPU_type_t)
+      (vgpu_type2 : API.vGPU_type_t) =
+    vgpu_type1.vGPU_type_vendor_name = vgpu_type2.vGPU_type_vendor_name
+    && vgpu_type1.vGPU_type_model_name = vgpu_type2.vGPU_type_model_name
+    && vgpu_type1.vGPU_type_framebuffer_size
+       = vgpu_type2.vGPU_type_framebuffer_size
+    && vgpu_type1.vGPU_type_max_heads = vgpu_type2.vGPU_type_max_heads
+    && vgpu_type1.vGPU_type_max_resolution_y
+       = vgpu_type2.vGPU_type_max_resolution_y
+    && vgpu_type1.vGPU_type_max_resolution_x
+       = vgpu_type2.vGPU_type_max_resolution_x
+    && vgpu_type1.vGPU_type_identifier = vgpu_type2.vGPU_type_identifier
+    && vgpu_type1.vGPU_type_experimental = vgpu_type2.vGPU_type_experimental
+  in
+  match (vgpu_type1_id, vgpu_type2_id) with
+  | Nvidia _, Nvidia _ ->
+      compare_vgpu_in_vm vgpu_type1 vgpu_type2
+  | GVT_g _, GVT_g _ ->
+      compare_vgpu_in_vm vgpu_type1 vgpu_type2
+  | MxGPU _, MxGPU _ ->
+      compare_vgpu_in_vm vgpu_type1 vgpu_type2
+  | Passthrough, Passthrough ->
+      compare_vgpu_in_vm vgpu_type1 vgpu_type2
+  | _, _ ->
+      false
+
+let compatibility_match_in_pgpu (vgpu_type1 : API.vGPU_type_t)
+    (vgpu_type2 : API.vGPU_type_t) =
+  let vgpu_type1_id = Identifier.of_string vgpu_type1.vGPU_type_identifier in
+  let vgpu_type2_id = Identifier.of_string vgpu_type2.vGPU_type_identifier in
+  let compare_vgpu_in_pgpu ?(is_nvidia = false) (vgpu_type1 : API.vGPU_type_t)
+      (vgpu_type2 : API.vGPU_type_t) =
+    let get_card model = String.split_on_char '-' model |> List.hd in
+    vgpu_type1.vGPU_type_vendor_name = vgpu_type2.vGPU_type_vendor_name
+    && (vgpu_type1.vGPU_type_model_name = vgpu_type2.vGPU_type_model_name
+       || is_nvidia
+       )
+    && get_card vgpu_type1.vGPU_type_model_name
+       = get_card vgpu_type2.vGPU_type_model_name
+    && vgpu_type1.vGPU_type_framebuffer_size
+       = vgpu_type2.vGPU_type_framebuffer_size
+    && vgpu_type1.vGPU_type_max_heads = vgpu_type2.vGPU_type_max_heads
+    && vgpu_type1.vGPU_type_max_resolution_y
+       = vgpu_type2.vGPU_type_max_resolution_y
+    && vgpu_type1.vGPU_type_max_resolution_x
+       = vgpu_type2.vGPU_type_max_resolution_x
+    && vgpu_type1.vGPU_type_identifier = vgpu_type2.vGPU_type_identifier
+    && vgpu_type1.vGPU_type_experimental = vgpu_type2.vGPU_type_experimental
+  in
+  match (vgpu_type1_id, vgpu_type2_id) with
+  | Nvidia _, Nvidia _ ->
+      compare_vgpu_in_pgpu ~is_nvidia:true vgpu_type1 vgpu_type2
+  | GVT_g _, GVT_g _ ->
+      compare_vgpu_in_pgpu vgpu_type1 vgpu_type2
+  | MxGPU _, MxGPU _ ->
+      compare_vgpu_in_pgpu vgpu_type1 vgpu_type2
+  | Passthrough, Passthrough ->
+      compare_vgpu_in_pgpu vgpu_type1 vgpu_type2
+  | _, _ ->
+      false
 
 let create ~__context ~vendor_name ~model_name ~framebuffer_size ~max_heads
     ~max_resolution_x ~max_resolution_y ~size ~internal_config ~implementation

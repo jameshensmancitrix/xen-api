@@ -58,10 +58,12 @@ let assert_VGPU_type_allowed ~__context ~self ~vgpu_type =
   (* Theh new vGPU must compatible with all the allocated vGPUs on the pGPU,
    * Namely, the new vGPU type must in the compatible_types_on_pgpu of all the allocated vGPUs *)
   let compatible_with_new_vGPU_type vgpu =
+    let vgpu_type = Db.VGPU_type.get_record ~__context ~self:vgpu_type in
     vgpu
     |> (fun self -> Db.VGPU.get_type ~__context ~self)
     |> (fun self -> Db.VGPU_type.get_compatible_types_on_pgpu ~__context ~self)
-    |> List.mem vgpu_type
+    |> List.map (fun self -> Db.VGPU_type.get_record ~__context ~self)
+    |> List.exists (Xapi_vgpu_type.compatibility_match_in_pgpu vgpu_type)
   in
   let compatible_on_pgpu =
     List.for_all compatible_with_new_vGPU_type allocated_vgpu_list
@@ -216,7 +218,7 @@ let assert_destination_pgpu_is_compatible_with_vm ~__context ~vm ~vgpu ~pgpu
       test_nvidia_compatibility vgpu pgpu
 
 let assert_destination_has_pgpu_compatible_with_vm ~__context ~vm ~vgpu_map
-    ~host ?remote () =
+    ~(* ? Check this ?*) host ?remote () =
   let module XenAPI = Client.Client in
   let get_pgpus_of_host host =
     match remote with
