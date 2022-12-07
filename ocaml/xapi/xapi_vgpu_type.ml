@@ -90,7 +90,7 @@ module Identifier = struct
     try
       let data = String.split_on_char ':' str |> List.tl |> List.hd in
       match String.split_on_char ',' data with
-      | ["nvidia"; pdev_id; psubdev_id; vdev_id; vsubdev_id;sriov] ->
+      | ["nvidia"; pdev_id; psubdev_id; vdev_id; vsubdev_id; sriov] ->
           let pdev_id = int_of_string ("0x" ^ pdev_id) in
           let vdev_id = int_of_string ("0x" ^ vdev_id) in
           let vsubdev_id = int_of_string ("0x" ^ vsubdev_id) in
@@ -115,8 +115,15 @@ module Identifier = struct
       | ["passthrough"] ->
           Passthrough
       | _ ->
-          failwith (Printf.sprintf "Error: Cannot parse Identifier string:%s passed to function" str)
-    with _ -> failwith (Printf.sprintf "Error: Invalid Identifier string:%s passed to function" str)
+          failwith
+            (Printf.sprintf
+               "Error: Cannot parse Identifier string:%s passed to function" str
+            )
+    with _ ->
+      failwith
+        (Printf.sprintf "Error: Invalid Identifier string:%s passed to function"
+           str
+        )
 
   let to_implementation : t -> API.vgpu_type_implementation = function
     | Passthrough ->

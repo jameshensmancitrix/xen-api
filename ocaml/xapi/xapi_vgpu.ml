@@ -84,11 +84,16 @@ let create' ~__context ~vM ~gPU_group ~device ~other_config ~_type
   let types =
     List.map (fun vgpu -> Db.VGPU.get_type ~__context ~self:vgpu) existing
   in
-  let is_in_compatible_lists _type vgpu_type =
+  let is_in_compatible_lists vgpu_type1 vgpu_type2 =
     let compatible_lists =
-      Db.VGPU_type.get_compatible_types_in_vm ~__context ~self:vgpu_type
+      Db.VGPU_type.get_compatible_types_in_vm ~__context ~self:vgpu_type2
+      |> List.map (fun self -> Db.VGPU_type.get_record ~__context ~self)
     in
-    List.mem _type compatible_lists
+    List.exists
+      (Xapi_vgpu_type.compatibility_match_in_vm
+         (Db.VGPU_type.get_record ~__context ~self:vgpu_type1)
+      )
+      compatible_lists
   in
   if not (List.for_all (is_in_compatible_lists _type) types) then
     raise
