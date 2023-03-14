@@ -81,6 +81,8 @@ module Spans = struct
 
   let spans = Hashtbl.create 100
 
+  let finished_spans = Hashtbl.create 100
+
   let add_to_spans ~(span : Span.t) =
     Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
         let key = span.context.trace_id in
@@ -92,11 +94,94 @@ module Spans = struct
               Hashtbl.replace spans key (span :: span_list)
     )
 
+  let mark_finished ~(span : Span.t) =
+    Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+        let key = span.context.trace_id in
+        match Hashtbl.find_opt spans key with
+        | None ->
+            debug "Span does not exist or already finished"
+        | Some span_list -> (
+          match
+            List.filter (fun x -> x.Span.context <> span.context) span_list
+          with
+          | [] ->
+              Hashtbl.remove spans key
+          | filtered_list -> (
+              Hashtbl.replace spans key filtered_list ;
+              match Hashtbl.find_opt finished_spans key with
+              | None ->
+                  Hashtbl.add finished_spans key [span]
+              | Some span_list ->
+                  if List.length span_list < 1000 then
+                    Hashtbl.replace finished_spans key (span :: span_list)
+            )
+        )
+    )
+
+  let assert_finished x =
+    match x with
+    | None ->
+        false
+    | Some (span : Span.t) -> (
+      match Hashtbl.find_opt finished_spans span.context.trace_id with
+      | None ->
+          false
+      | Some span_list ->
+          List.exists (fun x -> x = span) span_list
+    )
+
   let since () =
     Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
-        let copy = Hashtbl.copy spans in
-        Hashtbl.clear spans ; copy
+        let copy = Hashtbl.copy finished_spans in
+        Hashtbl.clear finished_spans ;
+        copy
     )
+
+  module GC = struct
+    let lock = Mutex.create ()
+
+    let span_timeout = ref 86400.
+
+    let span_timeout_thread = ref None
+
+    let gc_inactive_spans () =
+      Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+          Hashtbl.iter
+            (fun _ (spanlist : Span.t list) ->
+              List.iter
+                (fun (span : Span.t) ->
+                  let elapsed = Unix.gettimeofday () -. span.begin_time in
+                  if elapsed > !span_timeout *. 1000000. then
+                    debug "Tracing: Span %s timed out, forcibly finishing now"
+                      span.context.span_id ;
+                  let span =
+                    Span.finish ~span
+                      ~tags:
+                        [("gc_inactive_span_timeout", string_of_float elapsed)]
+                      ()
+                  in
+                  mark_finished ~span
+                )
+                spanlist
+            )
+            spans
+      )
+
+    let initialise_thread ~timeout =
+      span_timeout := timeout ;
+      span_timeout_thread :=
+        Some
+          (Thread.create
+             (fun () ->
+               while true do
+                 debug "Tracing: Span garbage collector" ;
+                 Thread.delay !span_timeout ;
+                 gc_inactive_spans ()
+               done
+             )
+             ()
+          )
+  end
 end
 
 module Tracer = struct
@@ -129,8 +214,17 @@ module Tracer = struct
       Spans.add_to_spans ~span ; Ok (Some span)
 
   let finish (span : Span.t option) : (unit, exn) result =
-    let _span = Option.map (fun span -> Span.finish ~span ()) span in
+    let _ =
+      Option.map
+        (fun span ->
+          let span = Span.finish ~span () in
+          Spans.mark_finished ~span
+        )
+        span
+    in
     Ok ()
+
+  let assert_finished x = Spans.assert_finished x
 end
 
 module TracerProvider = struct
@@ -189,6 +283,9 @@ let get_tracer ~name =
       Tracer.create ~name ~provider:(ref provider.TracerProvider.config)
   | [] ->
       warn "No provider found" ; Tracer.no_op
+
+let enable_span_garbage_collector ?(timeout = 86400.) () =
+  Spans.GC.initialise_thread ~timeout
 
 module Export = struct
   module Content = struct
@@ -266,7 +363,6 @@ module Export = struct
           in
           Xapi_stdext_unix.Unixext.mkdir_rec (Filename.dirname file) 0o700 ;
           Xapi_stdext_unix.Unixext.write_string_to_file file span_json ;
-          (* TODO: Ensure file is only written when trace is complete *)
           Ok ""
         with e -> Error e
     end
@@ -358,6 +454,7 @@ module Export = struct
       with e -> Error e
 
     let _ =
+      enable_span_garbage_collector () ;
       Thread.create
         (fun () ->
           while true do

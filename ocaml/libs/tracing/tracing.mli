@@ -30,6 +30,8 @@ module Tracer : sig
     -> (Span.t option, exn) result
 
   val finish : Span.t option -> (unit, exn) result
+
+  val assert_finished : Span.t option -> bool
 end
 
 module TracerProvider : sig
