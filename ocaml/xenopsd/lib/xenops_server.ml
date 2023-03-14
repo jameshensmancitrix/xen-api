@@ -1832,13 +1832,13 @@ let with_tracing ~name ~task f =
   let context = Xenops_task.tracing task in
   let parent : Tracing.t = Option.bind context Tracing.t_of_string in
   let tracer = Tracing.TracerProviders.get_default_tracer ~name in
-  let span = Tracing.Tracer.start ~tracer ~name ~parent () in
+  let span = Tracing.Tracer.start ~tracer ~name ~parent in
   match span with
   | Ok span ->
       let sub_context = Tracing.t_to_string_opt span in
       Xenops_task.set_tracing task sub_context ;
       let result = f () in
-      let _ = Tracing.finish span_context in
+      let _ = Tracing.Tracer.finish span in
       Xenops_task.set_tracing task context ;
       result
   | Error e ->
