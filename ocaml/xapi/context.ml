@@ -74,6 +74,15 @@ let complete_tracing_with_exn __context error =
 
 let tracing_of __context = __context.tracing
 
+let set_client_span __context =
+  let span =
+    Option.map
+      (fun span -> Tracing.Span.set_span_kind span Tracing.SpanKind.Client)
+      __context.tracing
+  in
+  __context.tracing <- span ;
+  span
+
 let get_session_id x =
   match x.session_id with
   | None ->
@@ -280,8 +289,6 @@ let from_forwarded_task ?(http_other_config = []) ?session_id
     (trackid_of_session ~with_brackets:true ~prefix:" " session_id) ;
   let tracing =
     let open Tracing in
-    (* Set parent based on trace context from forwarded call instead! *)
-    let parent = None in
     let tracer = get_tracer ~name:task_name in
     let parent, span_kind = tracing_of_origin tracer origin task_name in
     match Tracer.start ~span_kind ~tracer ~name:task_name ~parent () with
@@ -339,8 +346,6 @@ let make ?(http_other_config = []) ?(quiet = false) ?subtask_of ?session_id
   ) ;
   let tracing =
     let open Tracing in
-    (* Set parent based on incoming trace context instead! *)
-    let parent = None in
     let tracer = get_tracer ~name:task_name in
     let parent, span_kind = tracing_of_origin tracer origin task_name in
     match Tracer.start ~span_kind ~tracer ~name:task_name ~parent () with
