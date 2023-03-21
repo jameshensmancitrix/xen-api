@@ -11,14 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU Lesser General Public License for more details.
  *)
-
 module D = Debug.Make (struct let name = "tracing" end)
 
 open D
-
-let url_file = "/etc/xapi-tracing-url"
-
-let trace_log_dir = "/var/log/dt/zipkinv2/json"
 
 type endpoint = Bugtool | Url of string [@@deriving rpcty]
 
@@ -238,6 +233,8 @@ module TracerProvider = struct
         tracer
     | _ ->
         Tracer.no_op
+
+  let endpoints_of t = t.config.endpoints
 end
 
 let lock = Mutex.create ()
@@ -263,6 +260,9 @@ let set_default ~tags ~endpoints ~processors ~filters =
   Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
       Hashtbl.replace tracer_providers "default" default
   )
+
+let get_tracer_providers () =
+  Hashtbl.fold (fun _ provider acc -> provider :: acc) tracer_providers []
 
 let get_default () =
   try
@@ -339,7 +339,9 @@ module Export = struct
 
   module Destination = struct
     module File = struct
-      let export ~trace_id ~span_json : (string, exn) result =
+      let trace_log_dir = "/var/log/dt/zipkinv2/json"
+
+      let export ~trace_id ~span_json ~path : (string, exn) result =
         try
           (* TODO: *)
           let host_id = "" in
@@ -358,8 +360,7 @@ module Export = struct
               unix_time.tm_min unix_time.tm_sec microsec
           in
           let file =
-            String.concat "/" [trace_log_dir; trace_id; "xapi"; host_id; date]
-            ^ ".json"
+            String.concat "/" [path; trace_id; "xapi"; host_id; date] ^ ".json"
           in
           Xapi_stdext_unix.Unixext.mkdir_rec (Filename.dirname file) 0o700 ;
           Xapi_stdext_unix.Unixext.write_string_to_file file span_json ;
@@ -416,42 +417,28 @@ module Export = struct
         with e -> Error e
     end
 
-    let export_to_http_server () =
-      debug "Tracing: About to export to http server" ;
-      let url =
-        Xapi_stdext_unix.Unixext.string_of_file url_file |> String.trim
-      in
-      let span_list = Spans.since () in
+    let export_to_endpoint endpoint =
       try
-        Hashtbl.iter
-          (fun _ span_list ->
-            let zipkin_spans = Content.Json.Zipkinv2.content_of span_list in
-            match Http.export ~span_json:zipkin_spans ~url with
-            | Ok _ ->
-                ()
-            | Error e ->
-                raise e
-          )
-          span_list ;
-        Ok ()
-      with e -> Error e
-
-    let export_to_logs () =
-      debug "Tracing: About to export to dom0 logs" ;
-      let span_list = Spans.since () in
-      try
+        debug "Tracing: About to export" ;
+        let span_list = Spans.since () in
         Hashtbl.iter
           (fun trace_id span_list ->
             let zipkin_spans = Content.Json.Zipkinv2.content_of span_list in
-            match File.export ~trace_id ~span_json:zipkin_spans with
+            match
+              match endpoint with
+              | Url url ->
+                  Http.export ~span_json:zipkin_spans ~url
+              | Bugtool ->
+                  File.export ~trace_id ~span_json:zipkin_spans
+                    ~path:File.trace_log_dir
+            with
             | Ok _ ->
                 ()
             | Error e ->
                 raise e
           )
-          span_list ;
-        Ok ()
-      with e -> Error e
+          span_list
+      with e -> debug "Tracing: ERROR %s" (Printexc.to_string e)
 
     let _ =
       enable_span_garbage_collector () ;
@@ -460,11 +447,10 @@ module Export = struct
           while true do
             debug "Tracing: Waiting 30s before exporting spans" ;
             Thread.delay 30. ;
-            match export_to_http_server () with
-            | Ok () ->
-                ()
-            | Error e ->
-                debug "Tracing: Export ERROR %s" (Printexc.to_string e)
+            get_tracer_providers ()
+            |> List.iter (fun x ->
+                   TracerProvider.endpoints_of x |> List.iter export_to_endpoint
+               )
           done
         )
         ()
