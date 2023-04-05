@@ -18,6 +18,8 @@ open D
 
 let url_file = "/etc/xapi-tracing-url"
 
+let trace_log_dir = "/var/log/dt/zipkinv2/json"
+
 type endpoint = Bugtool | Url of string [@@deriving rpcty]
 
 type provider_config_t = {
@@ -239,6 +241,36 @@ module Export = struct
   end
 
   module Destination = struct
+    module File = struct
+      let export ~trace_id ~span_json : (string, exn) result =
+        try
+          (* TODO: *)
+          let host_id = "" in
+          let timestamp = Unix.gettimeofday () in
+          let timestamp_ms =
+            timestamp *. 1000000. |> int_of_float |> string_of_int
+          in
+          let microsec =
+            String.sub timestamp_ms 6 (String.length timestamp_ms - 6)
+          in
+          let unix_time = timestamp |> Unix.localtime in
+          let date =
+            Printf.sprintf "%d%02d%d-%d%d%d-%s"
+              (Int.rem unix_time.tm_year 100)
+              (unix_time.tm_mon + 1) unix_time.tm_mday unix_time.tm_hour
+              unix_time.tm_min unix_time.tm_sec microsec
+          in
+          let file =
+            String.concat "/" [trace_log_dir; trace_id; "xapi"; host_id; date]
+            ^ ".json"
+          in
+          Xapi_stdext_unix.Unixext.mkdir_rec (Filename.dirname file) 0o700 ;
+          Xapi_stdext_unix.Unixext.write_string_to_file file span_json ;
+          (* TODO: Ensure file is only written when trace is complete *)
+          Ok ""
+        with e -> Error e
+    end
+
     module Http = struct
       module Request = Cohttp.Request.Make (Cohttp_posix_io.Buffered_IO)
       module Response = Cohttp.Response.Make (Cohttp_posix_io.Buffered_IO)
@@ -299,6 +331,23 @@ module Export = struct
           (fun _ span_list ->
             let zipkin_spans = Content.Json.Zipkinv2.content_of span_list in
             match Http.export ~span_json:zipkin_spans ~url with
+            | Ok _ ->
+                ()
+            | Error e ->
+                raise e
+          )
+          span_list ;
+        Ok ()
+      with e -> Error e
+
+    let export_to_logs () =
+      debug "Tracing: About to export to dom0 logs" ;
+      let span_list = Spans.since () in
+      try
+        Hashtbl.iter
+          (fun trace_id span_list ->
+            let zipkin_spans = Content.Json.Zipkinv2.content_of span_list in
+            match File.export ~trace_id ~span_json:zipkin_spans with
             | Ok _ ->
                 ()
             | Error e ->
