@@ -76,6 +76,28 @@ val set_default :
   -> service_name:string
   -> unit
 
+val set :
+     ?status:bool
+  -> ?tags:(string * string) list
+  -> ?endpoints:string list
+  -> ?filters:string list
+  -> ?processors:string list
+  -> name_label:string
+  -> unit
+  -> unit
+
+val create :
+     status:bool
+  -> tags:(string * string) list
+  -> endpoints:string list
+  -> filters:string list
+  -> processors:string list
+  -> service_name:string
+  -> name_label:string
+  -> unit
+
+val destory : name_label:string -> unit
+
 val get_default : unit -> (TracerProvider.t, exn) result
 
 val get_tracer : name:string -> Tracer.t

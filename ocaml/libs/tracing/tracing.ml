@@ -389,6 +389,70 @@ let set_default ~tags ~endpoints ~processors ~filters ~service_name =
       Hashtbl.replace tracer_providers "default" default
   )
 
+let set ?status ?tags ?endpoints ?filters ?processors ~name_label () =
+  Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+      let provider : TracerProvider.t =
+        match Hashtbl.find_opt tracer_providers name_label with
+        | Some provider ->
+            let config = provider.config in
+            let enabled = Option.value ~default:config.enabled status in
+            let tags = Option.value ~default:config.tags tags in
+            let endpoints =
+              Option.fold ~none:config.endpoints
+                ~some:(List.map endpoint_of_string)
+                endpoints
+            in
+            let filters = Option.value ~default:config.filters filters in
+            let processors =
+              Option.value ~default:config.processors processors
+            in
+            let config =
+              {config with enabled; tags; endpoints; filters; processors}
+            in
+            let tracers =
+              List.map
+                (fun tracer : Tracer.t -> {tracer with provider= ref config})
+                provider.tracers
+            in
+            {config; tracers}
+        | None ->
+            failwith
+              (Printf.sprintf "The TracerProvider : %s does not exist"
+                 name_label
+              )
+      in
+      Hashtbl.replace tracer_providers name_label provider
+  )
+
+let create ~status ~tags ~endpoints ~filters ~processors ~service_name
+    ~name_label =
+  let tracers = [] in
+  let endpoints = List.map endpoint_of_string endpoints in
+  let config : provider_config_t =
+    {
+      name_label
+    ; tags
+    ; endpoints
+    ; filters
+    ; processors
+    ; service_name
+    ; enabled= status
+    }
+  in
+  match Hashtbl.find_opt tracer_providers name_label with
+  | None ->
+      Hashtbl.add tracer_providers name_label {tracers; config}
+  | Some _ ->
+      failwith "Tracing : TracerProvider already exists"
+
+let destory ~name_label =
+  if name_label = "default" then
+    failwith
+      "Tracing : You cannot remove the default provider, please disable it if \
+       you do not wish to use it"
+  else
+    Hashtbl.remove tracer_providers name_label
+
 let get_tracer_providers () =
   Hashtbl.fold (fun _ provider acc -> provider :: acc) tracer_providers []
 
