@@ -47,7 +47,7 @@ end
 module Tracer : sig
   type t
 
-  val span_of_span_context : SpanContext.t -> string -> Span.t
+  val span_of_span_context : t -> SpanContext.t -> string -> Span.t
 
   val start :
        ?span_kind:SpanKind.t
@@ -73,6 +73,7 @@ val set_default :
   -> endpoints:string list
   -> processors:string list
   -> filters:string list
+  -> service_name:string
   -> unit
 
 val get_default : unit -> (TracerProvider.t, exn) result
