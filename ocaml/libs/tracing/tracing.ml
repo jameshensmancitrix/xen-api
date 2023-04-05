@@ -11,6 +11,25 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU Lesser General Public License for more details.
  *)
+
+module D = Debug.Make (struct let name = "tracing" end)
+
+open D
+
+type endpoint = Bugtool | Url of string [@@deriving rpcty]
+
+type provider_config_t = {
+    name_label: string
+  ; tags: (string * string) list
+  ; endpoints: endpoint list
+  ; filters: string list
+  ; processors: string list
+  ; enabled: bool
+}
+[@@deriving rpcty]
+
+let endpoint_of_string = function "bugtool" -> Bugtool | url -> Url url
+
 module SpanContext = struct
   type t = {trace_id: string; span_id: string} [@@deriving rpcty]
 end
@@ -71,11 +90,92 @@ module Spans = struct
 end
 
 module Tracer = struct
-  let start ~name ~parent : (Span.t option, exn) result =
-    let span = Span.start ~name ~parent () in
-    Spans.add_to_spans ~span ; Ok (Some span)
+  type t = {name: string; provider: provider_config_t ref}
+
+  let create ~name ~provider = {name; provider}
+
+  let no_op =
+    let provider =
+      ref
+        {
+          name_label= ""
+        ; tags= []
+        ; endpoints= []
+        ; filters= []
+        ; processors= []
+        ; enabled= false
+        }
+    in
+    {name= ""; provider}
+
+  let start ~tracer:t ~name ~parent : (Span.t option, exn) result =
+    let provider = !(t.provider) in
+    (* Do not start span if the TracerProvider is diabled*)
+    if not provider.enabled then
+      Ok None
+    else
+      let tags = provider.tags in
+      let span = Span.start ~tags ~name ~parent () in
+      Spans.add_to_spans ~span ; Ok (Some span)
 
   let finish (span : Span.t option) : (unit, exn) result =
     let _span = Option.map (fun span -> Span.finish ~span ()) span in
     Ok ()
 end
+
+module TracerProvider = struct
+  type t = {tracers: Tracer.t list; config: provider_config_t}
+
+  let get_tracer ~provider:t ~name =
+    match
+      List.filter (fun (tracer : Tracer.t) -> tracer.name = name) t.tracers
+    with
+    | [tracer] ->
+        tracer
+    | _ ->
+        Tracer.no_op
+end
+
+let lock = Mutex.create ()
+
+let tracer_providers = Hashtbl.create 100
+
+let set_default ~tags ~endpoints ~processors ~filters =
+  let endpoints = List.map endpoint_of_string endpoints in
+  let default : TracerProvider.t =
+    {
+      tracers= []
+    ; config=
+        {
+          name_label= "default"
+        ; tags= ("provider", "default") :: tags
+        ; endpoints
+        ; filters
+        ; processors
+        ; enabled= true
+        }
+    }
+  in
+  Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+      Hashtbl.replace tracer_providers "default" default
+  )
+
+let get_default () =
+  try
+    Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+        let provider = Hashtbl.find tracer_providers "default" in
+        Ok provider
+    )
+  with e -> Error e
+
+let get_tracer ~name =
+  let providers =
+    Xapi_stdext_threads.Threadext.Mutex.execute lock (fun () ->
+        Hashtbl.fold (fun _k v acc -> v :: acc) tracer_providers []
+    )
+  in
+  match providers with
+  | provider :: _ ->
+      Tracer.create ~name ~provider:(ref provider.TracerProvider.config)
+  | [] ->
+      warn "No provider found" ; Tracer.no_op

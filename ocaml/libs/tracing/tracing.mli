@@ -21,7 +21,30 @@ module Span : sig
 end
 
 module Tracer : sig
-  val start : name:string -> parent:Span.t option -> (Span.t option, exn) result
+  type t
 
-  val finish : Span.t -> (unit, exn) result
+  val start :
+       tracer:t
+    -> name:string
+    -> parent:Span.t option
+    -> (Span.t option, exn) result
+
+  val finish : Span.t option -> (unit, exn) result
 end
+
+module TracerProvider : sig
+  type t
+
+  val get_tracer : provider:t -> name:string -> Tracer.t
+end
+
+val set_default :
+     tags:(string * string) list
+  -> endpoints:string list
+  -> processors:string list
+  -> filters:string list
+  -> unit
+
+val get_default : unit -> (TracerProvider.t, exn) result
+
+val get_tracer : name:string -> Tracer.t
