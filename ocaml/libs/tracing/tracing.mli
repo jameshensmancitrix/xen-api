@@ -12,21 +12,31 @@
  * GNU Lesser General Public License for more details.
  *)
 
+module SpanKind : sig
+  type t = Server | Consumer | Client | Producer | Internal
+
+  val to_string : t -> string
+end
+
 module Span : sig
   type t
 
   val of_string : string -> t option
 
   val to_string : t -> string
+
+  val set_span_kind : t -> SpanKind.t -> unit
 end
 
 module Tracer : sig
   type t
 
   val start :
-       tracer:t
+       ?span_kind:SpanKind.t
+    -> tracer:t
     -> name:string
     -> parent:Span.t option
+    -> unit
     -> (Span.t option, exn) result
 
   val finish : Span.t option -> (unit, exn) result

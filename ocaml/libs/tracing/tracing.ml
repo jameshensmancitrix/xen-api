@@ -17,6 +17,22 @@ open D
 
 type endpoint = Bugtool | Url of string [@@deriving rpcty]
 
+module SpanKind = struct
+  type t = Server | Consumer | Client | Producer | Internal [@@deriving rpcty]
+
+  let to_string = function
+    | Server ->
+        "SERVER"
+    | Consumer ->
+        "CONSUMER"
+    | Client ->
+        "CLIENT"
+    | Producer ->
+        "PRODUCER"
+    | Internal ->
+        "INTERNAL"
+end
+
 type provider_config_t = {
     name_label: string
   ; tags: (string * string) list
@@ -36,6 +52,7 @@ end
 module Span = struct
   type t = {
       context: SpanContext.t
+    ; mutable span_kind: SpanKind.t
     ; parent: t option
     ; name: string
     ; begin_time: float
@@ -46,7 +63,7 @@ module Span = struct
 
   let generate_id n = String.init n (fun _ -> "0123456789abcdef".[Random.int 16])
 
-  let start ?(tags = []) ~name ~parent () =
+  let start ?(tags = []) ~name ~parent ~span_kind () =
     let trace_id =
       match parent with
       | None ->
@@ -58,10 +75,12 @@ module Span = struct
     let context : SpanContext.t = {trace_id; span_id} in
     let begin_time = Unix.gettimeofday () in
     let end_time = None in
-    {context; parent; name; begin_time; end_time; tags}
+    {context; span_kind; parent; name; begin_time; end_time; tags}
 
   let finish ?(tags = []) ~span () =
     {span with end_time= Some (Unix.gettimeofday ()); tags= span.tags @ tags}
+
+  let set_span_kind span kind = span.span_kind <- kind
 
   let to_string s = Rpcmarshal.marshal t.Rpc.Types.ty s |> Jsonrpc.to_string
 
@@ -198,14 +217,15 @@ module Tracer = struct
     in
     {name= ""; provider}
 
-  let start ~tracer:t ~name ~parent : (Span.t option, exn) result =
+  let start ?(span_kind = SpanKind.Internal) ~tracer:t ~name ~parent () :
+      (Span.t option, exn) result =
     let provider = !(t.provider) in
     (* Do not start span if the TracerProvider is diabled*)
     if not provider.enabled then
       Ok None
     else
       let tags = provider.tags in
-      let span = Span.start ~tags ~name ~parent () in
+      let span = Span.start ~tags ~name ~parent ~span_kind () in
       Spans.add_to_spans ~span ; Ok (Some span)
 
   let finish (span : Span.t option) : (unit, exn) result =
@@ -301,13 +321,19 @@ module Export = struct
             ; name: string
             ; timestamp: int
             ; duration: int
-            ; kind: string
+            ; kind: string option
             ; localEndpoint: localEndpoint
             ; tags: (string * string) list
           }
           [@@deriving rpcty]
 
           type t_list = t list [@@deriving rpcty]
+
+          let kind_to_zipkin_kind = function
+            | SpanKind.Internal ->
+                None
+            | k ->
+                Some k
 
           let json_of_t_list s =
             Rpcmarshal.marshal t_list.Rpc.Types.ty s |> Jsonrpc.to_string
@@ -326,7 +352,9 @@ module Export = struct
               -. s.begin_time
               |> ( *. ) 1000000.
               |> int_of_float
-          ; kind= "SERVER"
+          ; kind=
+              Option.map SpanKind.to_string
+                (ZipkinSpan.kind_to_zipkin_kind s.span_kind)
           ; localEndpoint= {serviceName= "xapi"}
           ; tags= s.tags
           }
