@@ -18,6 +18,12 @@ module SpanKind : sig
   val to_string : t -> string
 end
 
+module Status : sig
+  type status_code
+
+  type t
+end
+
 module SpanContext : sig
   type t
 
@@ -51,7 +57,7 @@ module Tracer : sig
     -> unit
     -> (Span.t option, exn) result
 
-  val finish : Span.t option -> (unit, exn) result
+  val finish : ?error:exn -> Span.t option -> (unit, exn) result
 
   val assert_finished : Span.t option -> bool
 end

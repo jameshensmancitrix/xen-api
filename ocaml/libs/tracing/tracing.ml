@@ -45,6 +45,28 @@ type provider_config_t = {
 
 let endpoint_of_string = function "bugtool" -> Bugtool | url -> Url url
 
+module Status = struct
+  type status_code = Unset | Ok | Error [@@deriving rpcty]
+
+  type t = {status_code: status_code; description: string option}
+  [@@deriving rpcty]
+
+  let status_to_string status =
+    let desc =
+      Option.fold ~none:"" ~some:(fun d -> " " ^ d) status.description
+    in
+    let value =
+      match status.status_code with
+      | Unset ->
+          "Unset"
+      | Ok ->
+          "Ok"
+      | Error ->
+          "Error"
+    in
+    value ^ desc
+end
+
 module SpanContext = struct
   type t = {trace_id: string; span_id: string} [@@deriving rpcty]
 
@@ -63,6 +85,7 @@ module Span = struct
   type t = {
       context: SpanContext.t
     ; mutable span_kind: SpanKind.t
+    ; status: Status.t
     ; parent: t option
     ; name: string
     ; begin_time: float
@@ -87,12 +110,47 @@ module Span = struct
     let context : SpanContext.t = {trace_id; span_id} in
     let begin_time = Unix.gettimeofday () in
     let end_time = None in
-    {context; span_kind; parent; name; begin_time; end_time; tags}
+    let status : Status.t = {status_code= Status.Unset; description= None} in
+    {context; span_kind; status; parent; name; begin_time; end_time; tags}
 
   let finish ?(tags = []) ~span () =
+    let status = span.status in
+    let tags =
+      if status.status_code = Error then
+        ( Status.status_to_string status
+        , Option.value ~default:"" status.Status.description
+        )
+        :: tags
+      else
+        tags
+    in
     {span with end_time= Some (Unix.gettimeofday ()); tags= span.tags @ tags}
 
   let set_span_kind span kind = span.span_kind <- kind
+
+  let set_error span exn =
+    let backtrace = Printexc.get_backtrace () in
+    let description =
+      Some
+        (Printf.sprintf "Error: %s Backtrace: %s" (Printexc.to_string exn)
+           backtrace
+        )
+    in
+    let status_code = Status.Error in
+    match span.status.status_code with
+    | Unset ->
+        {span with status= {status_code; description}}
+    | _ ->
+        span
+
+  let set_ok span =
+    let description = None in
+    let status_code = Status.Ok in
+    match span.status.status_code with
+    | Unset ->
+        {span with status= {status_code; description}}
+    | _ ->
+        span
 
   let to_string s = Rpcmarshal.marshal t.Rpc.Types.ty s |> Jsonrpc.to_string
 
@@ -232,6 +290,7 @@ module Tracer = struct
   let span_of_span_context context name : Span.t =
     {
       context
+    ; status= {status_code= Status.Unset; description= None}
     ; name
     ; parent= None
     ; span_kind= SpanKind.Client (* This will be the span of the client call*)
@@ -251,10 +310,17 @@ module Tracer = struct
       let span = Span.start ~tags ~name ~parent ~span_kind () in
       Spans.add_to_spans ~span ; Ok (Some span)
 
-  let finish (span : Span.t option) : (unit, exn) result =
+  let finish ?error (span : Span.t option) : (unit, exn) result =
     let _ =
       Option.map
         (fun span ->
+          let span =
+            match error with
+            | Some exn ->
+                Span.set_error span exn
+            | None ->
+                Span.set_ok span
+          in
           let span = Span.finish ~span () in
           Spans.mark_finished ~span
         )
