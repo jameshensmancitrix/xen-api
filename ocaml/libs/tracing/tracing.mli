@@ -101,3 +101,11 @@ val destory : name_label:string -> unit
 val get_default : unit -> (TracerProvider.t, exn) result
 
 val get_tracer : name:string -> Tracer.t
+
+module Export : sig
+  module Destination : sig
+    module File : sig
+      val set_trace_log_dir : string -> unit
+    end
+  end
+end

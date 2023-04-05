@@ -540,7 +540,9 @@ module Export = struct
 
   module Destination = struct
     module File = struct
-      let trace_log_dir = "/var/log/dt/zipkinv2/json"
+      let trace_log_dir = ref "/var/log/dt/zipkinv2/json"
+
+      let set_trace_log_dir dir = trace_log_dir := dir
 
       let export ~trace_id ~span_json ~path : (string, exn) result =
         try
@@ -631,7 +633,7 @@ module Export = struct
                   Http.export ~span_json:zipkin_spans ~url
               | Bugtool ->
                   File.export ~trace_id ~span_json:zipkin_spans
-                    ~path:File.trace_log_dir
+                    ~path:!File.trace_log_dir
             with
             | Ok _ ->
                 ()
