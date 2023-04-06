@@ -45,6 +45,7 @@ type provider_config_t = {
 [@@deriving rpcty]
 
 let endpoint_of_string = function "bugtool" -> Bugtool | url -> Url url
+let ok_none = Ok None
 
 module Status = struct
   type status_code = Unset | Ok | Error [@@deriving rpcty]
@@ -319,7 +320,7 @@ module Tracer = struct
     let provider = !(t.provider) in
     (* Do not start span if the TracerProvider is diabled*)
     if not provider.enabled then
-      Ok None
+      ok_none
     else
       let tags = provider.tags in
       let span =
