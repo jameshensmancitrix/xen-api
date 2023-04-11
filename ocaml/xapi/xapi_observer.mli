@@ -15,6 +15,8 @@
 val observed_hosts_of :
   __context:Context.t -> API.ref_host list -> API.ref_host list
 
+val initialise : __context:Context.t -> unit
+
 val create :
      __context:Context.t
   -> name_label:string
