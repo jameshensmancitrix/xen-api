@@ -2628,12 +2628,12 @@ let pool_patch_record rpc session_id patch =
         (fun x -> Client.Host_patch.get_host ~rpc ~session_id ~self:x)
         host_patch_refs
     in
-    let host_uuids =
+    let hosts =
       List.map
         (fun x -> Client.Host.get_uuid ~rpc ~session_id ~self:x)
         host_refs
     in
-    host_uuids
+    hosts
   in
   let after_apply_guidance_to_string = function
     | `restartHVM ->
@@ -2698,12 +2698,12 @@ let pool_update_record rpc session_id update =
   let x () = lzy_get record in
   let get_hosts () =
     let host_refs = (x ()).API.pool_update_hosts in
-    let host_uuids =
+    let hosts =
       List.map
         (fun x -> Client.Host.get_uuid ~rpc ~session_id ~self:x)
         host_refs
     in
-    host_uuids
+    hosts
   in
   let after_apply_guidance_to_string = function
     | `restartHVM ->
@@ -5248,6 +5248,162 @@ let vtpm_record rpc session_id vtpm =
           ~get_set:(fun () ->
             List.map Record_util.vtpm_operation_to_string
               (x ()).API.vTPM_allowed_operations
+          )
+          ()
+      ]
+  }
+
+let observer_record rpc session_id observer =
+  let _ref = ref observer in
+  let empty_record =
+    ToGet (fun () -> Client.Observer.get_record ~rpc ~session_id ~self:!_ref)
+  in
+  let record = ref empty_record in
+  let x () = lzy_get record in
+  {
+    setref=
+      (fun r ->
+        _ref := r ;
+        record := empty_record
+      )
+  ; setrefrec=
+      (fun (a, b) ->
+        _ref := a ;
+        record := Got b
+      )
+  ; record= x
+  ; getref= (fun () -> !_ref)
+  ; fields=
+      [
+        make_field ~name:"uuid" ~get:(fun () -> (x ()).API.observer_uuid) ()
+      ; make_field ~name:"host-uuids"
+          ~get:(fun () ->
+            map_and_concat get_uuid_from_ref (x ()).API.observer_hosts
+          )
+          ~set:(fun s ->
+            let value =
+              get_words ',' s
+              |> List.map (fun uuid ->
+                     Client.Host.get_by_uuid ~rpc ~session_id ~uuid
+                 )
+            in
+            Client.Observer.set_hosts ~rpc ~session_id ~self:observer ~value
+          )
+          ~remove_from_set:(fun uuid ->
+            let host = Client.Host.get_by_uuid ~rpc ~session_id ~uuid in
+            let hosts =
+              Client.Observer.get_hosts ~rpc ~session_id ~self:observer
+            in
+            let value = List.filter (( <> ) host) hosts in
+            Client.Observer.set_hosts ~rpc ~session_id ~self:observer ~value
+          )
+          ~add_to_set:(fun uuid ->
+            let host = Client.Host.get_by_uuid ~rpc ~session_id ~uuid in
+            let hosts =
+              Client.Observer.get_hosts ~rpc ~session_id ~self:observer
+            in
+            let value = if List.mem host hosts then hosts else host :: hosts in
+            Client.Observer.set_hosts ~rpc ~session_id ~self:observer ~value
+          )
+          ()
+      ; make_field ~name:"name-label"
+          ~get:(fun () -> (x ()).API.observer_name_label)
+          ()
+      ; make_field ~name:"name-description"
+          ~get:(fun () -> (x ()).API.observer_name_description)
+          ()
+      ; make_field ~name:"attributes"
+          ~get:(fun () ->
+            Record_util.s2sm_to_string "; " (x ()).API.observer_attributes
+          )
+          ~get_map:(fun () -> (x ()).API.observer_attributes)
+          ~set_map:(fun value ->
+            Client.Observer.set_attributes ~rpc ~session_id ~self:observer
+              ~value
+          )
+          ~remove_from_map:(fun attribute ->
+            let attributes =
+              Client.Observer.get_attributes ~rpc ~session_id ~self:observer
+            in
+            let value = List.remove_assoc attribute attributes in
+            Client.Observer.set_attributes ~rpc ~session_id ~self:observer
+              ~value
+          )
+          ~add_to_map:(fun k v ->
+            let attributes =
+              Client.Observer.get_attributes ~rpc ~session_id ~self:observer
+            in
+            let value =
+              if List.mem_assoc k attributes then
+                attributes
+              else
+                (k, v) :: attributes
+            in
+            Client.Observer.set_attributes ~rpc ~session_id ~self:observer
+              ~value
+          )
+          ()
+      ; make_field ~name:"endpoints"
+          ~get:(fun () -> map_and_concat Fun.id (x ()).API.observer_endpoints)
+          ~set:(fun s ->
+            Client.Observer.set_endpoints ~rpc ~session_id ~self:observer
+              ~value:(get_words ',' s)
+          )
+          ~get_set:(fun () -> (x ()).API.observer_endpoints)
+          ~remove_from_set:(fun endpoint ->
+            let endpoints =
+              Client.Observer.get_endpoints ~rpc ~session_id ~self:observer
+            in
+            let value = List.filter (( <> ) endpoint) endpoints in
+            Client.Observer.set_endpoints ~rpc ~session_id ~self:observer ~value
+          )
+          ~add_to_set:(fun endpoint ->
+            let endpoints =
+              Client.Observer.get_endpoints ~rpc ~session_id ~self:observer
+            in
+            let value =
+              if List.mem endpoint endpoints then
+                endpoints
+              else
+                endpoint :: endpoints
+            in
+            Client.Observer.set_endpoints ~rpc ~session_id ~self:observer ~value
+          )
+          ()
+      ; make_field ~name:"components"
+          ~get:(fun () -> map_and_concat Fun.id (x ()).API.observer_components)
+          ~set:(fun s ->
+            Client.Observer.set_components ~rpc ~session_id ~self:observer
+              ~value:(get_words ',' s)
+          )
+          ~get_set:(fun () -> (x ()).API.observer_components)
+          ~remove_from_set:(fun component ->
+            let components =
+              Client.Observer.get_components ~rpc ~session_id ~self:observer
+            in
+            let value = List.filter (( <> ) component) components in
+            Client.Observer.set_components ~rpc ~session_id ~self:observer
+              ~value
+          )
+          ~add_to_set:(fun component ->
+            let components =
+              Client.Observer.get_components ~rpc ~session_id ~self:observer
+            in
+            let value =
+              if List.mem component components then
+                components
+              else
+                component :: components
+            in
+            Client.Observer.set_components ~rpc ~session_id ~self:observer
+              ~value
+          )
+          ()
+      ; make_field ~name:"enabled"
+          ~get:(fun () -> string_of_bool (x ()).API.observer_enabled)
+          ~set:(fun s ->
+            Client.Observer.set_enabled ~rpc ~session_id ~self:observer
+              ~value:(bool_of_string s)
           )
           ()
       ]
