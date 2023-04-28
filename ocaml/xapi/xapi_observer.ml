@@ -78,7 +78,8 @@ let register ~__context ~self ~host =
   let uuid = Db.Observer.get_uuid ~__context ~self in
   let endpoints = Db.Observer.get_endpoints ~__context ~self in
   let enabled = Db.Observer.get_enabled ~__context ~self in
-  ()
+  Tracing.create ~uuid ~name_label ~tags:attributes ~endpoints ~processors:[]
+    ~filters:[] ~enabled ~service_name:"xapi"
 
 let create' ?(reg_fn = Fun.id) ~__context ~name_label ~name_description ~hosts
     ~attributes ~endpoints ~components ~enabled () =
@@ -109,7 +110,7 @@ let create ~__context ~name_label ~name_description ~hosts ~attributes
 
 let unregister ~__context ~self ~host:_ =
   let uuid = Db.Observer.get_uuid ~__context ~self in
-  ()
+  Tracing.destroy ~uuid
 
 let destroy' ?(dest_fn = Fun.id) ~__context ~self () =
   dest_fn () ;
@@ -125,17 +126,18 @@ let destroy ~__context ~self =
   ) ;
   destroy' ~__context ~self ()
 
-let set_trace_log_dir dir = ()
+let set_trace_log_dir dir =
+  Tracing.Export.Destination.File.set_trace_log_dir dir
 
-let set_export_interval interval = ()
+let set_export_interval interval = Tracing.Export.set_export_interval interval
 
-let set_max_spans spans = ()
+let set_max_spans spans = Tracing.Spans.set_max_spans spans
 
-let set_max_traces traces = ()
+let set_max_traces traces = Tracing.Spans.set_max_traces traces
 
-let set_host_id host_id = ()
+let set_host_id host_id = Tracing.Export.Destination.File.set_host_id host_id
 
-let init () = ()
+let init () = ignore @@ Tracing.main ()
 
 let load ~__context =
   let all = Db.Observer.get_all ~__context in
@@ -183,11 +185,18 @@ let set_hosts ~__context ~self ~value =
   ) ;
   Db.Observer.set_hosts ~__context ~self ~value
 
-let set_enabled ~__context ~self:_ ~value:_ = ()
+let set_enabled ~__context ~self ~value =
+  let uuid = Db.Observer.get_uuid ~__context ~self in
+  Tracing.set ~uuid ~enabled:value ()
 
-let set_attributes ~__context ~self:_ ~value:_ = ()
+let set_attributes ~__context ~self ~value =
+  let uuid = Db.Observer.get_uuid ~__context ~self in
+  Tracing.set ~uuid ~tags:value ()
 
-let set_endpoints ~__context ~self:_ ~value = assert_valid_endpoints value
+let set_endpoints ~__context ~self ~value =
+  assert_valid_endpoints value ;
+  let uuid = Db.Observer.get_uuid ~__context ~self in
+  Tracing.set ~uuid ~endpoints:value ()
 
 let set_components ~__context ~self:_ ~value = assert_valid_components value
 (* Will implement later, this function will set / unset providers on veraious components *)
