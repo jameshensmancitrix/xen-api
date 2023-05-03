@@ -17,6 +17,11 @@ open D
 
 type endpoint = Bugtool | Url of Uri.t
 
+let validate_attribute (key, value) =
+  let key_re = Re.Posix.compile_pat "^[a-z0-9][a-z0-9._]{0,253}[a-z0-9]$" in
+  Re.execp key_re key
+  && String.length value <= 4095
+
 module SpanKind = struct
   type t = Server | Consumer | Client | Producer | Internal [@@deriving rpcty]
 
