@@ -13,27 +13,117 @@
  *)
 open Tracing
 
-module D = Debug.Make (struct let name = "test_tracing" end)
+module D = Debug.Make (struct let name = "test_observer" end)
 
 open D
 
 let () = Printexc.record_backtrace true
 
-let _ =
-  create ~enabled:false ~name_label:"default" ~uuid:"123" ~tags:[]
-    ~endpoints:["bugtool"] ~processors:[] ~filters:[] ~service_name:"xapi" ;
-  main ()
+let test_trace_log_dir = "./test/var/log/dt/zipkinv2/json/"
+
+let () = Export.Destination.File.set_trace_log_dir test_trace_log_dir
+
+module Xapi_DB = struct
+  let assert_x_observers ~__context x =
+    let observers = Db.Observer.get_all ~__context in
+    Alcotest.(check int)
+      (Printf.sprintf "%d observer(s) exists in DB" x)
+      x (List.length observers)
+
+  let assert_observer_disabled ~__context ~self =
+    let enabled = Db.Observer.get_enabled ~__context ~self in
+    Alcotest.(check bool) "Observer disabled" false enabled
+
+  let assert_mandatory_attributes ~__context ~self = ()
+  (* no mandatory DB attributes*)
+
+  let check_endpoints ~__context ~self ~endpoints =
+    let db_endpoints = Db.Observer.get_endpoints ~__context ~self in
+    let _ =
+      List.map2
+        (fun x y -> Alcotest.(check string) "Observer contains endpoint" x y)
+        endpoints db_endpoints
+    in
+    ()
+end
+
+module TracerProvider = struct
+  let assert_x_observers ~__context x =
+    let providers = Tracing.get_tracer_providers () in
+    Alcotest.(check int)
+      (Printf.sprintf "%d provider(s) exists in lib " x)
+      x (List.length providers)
+
+  let find_provider_exn ~name =
+    let providers = Tracing.get_tracer_providers () in
+    match
+      List.find_opt (fun x -> x.TracerProvider.name_label = name) providers
+    with
+    | Some provider ->
+        provider
+    | None ->
+        Alcotest.failf "No provider with the name %s" name
+
+  let assert_observer_disabled ~name =
+    let provider = find_provider_exn ~name in
+    Alcotest.(check bool)
+      "Provider disabled" false provider.TracerProvider.enabled
+
+  let assert_mandatory_attributes ~name =
+    let provider = find_provider_exn ~name in
+    let tags = provider.TracerProvider.tags in
+    List.iter
+      (fun x ->
+        try
+          let _ = List.assoc x tags in
+          ()
+        with e -> Alcotest.failf "Missing mandatory attribute: %s" x
+      )
+      ["xs.pool.uuid"; "xs.host.name"; "xs.host.uuid"; "xs.observer.name"]
+
+  let check_endpoints ~name ~endpoints =
+    let provider = find_provider_exn ~name in
+    let provider_endpoints =
+      provider.TracerProvider.endpoints
+      |> List.map (fun endpoint ->
+             match endpoint with
+             | Bugtool ->
+                 "bugtool"
+             | Url x ->
+                 Uri.to_string x
+         )
+    in
+    let _ =
+      List.map2
+        (fun x y -> Alcotest.(check string) "Observer contains endpoint" x y)
+        endpoints provider_endpoints
+    in
+    ()
+end
+
+let test_destroy ~__context ~self () =
+  try
+    Xapi_observer.unregister ~__context ~self ~host:!Xapi_globs.localhost_ref ;
+    Xapi_observer.destroy ~__context ~self
+  with _ -> debug "Attempted to destroy an observer that does not exist"
+
+let test_create ~__context ?(name_label = "test-observer") ?(enabled = false) ()
+    =
+  let self =
+    Xapi_observer.create ~__context ~name_label ~name_description:"" ~hosts:[]
+      ~attributes:[] ~endpoints:["bugtool"] ~components:[] ~enabled
+  in
+  let host = !Xapi_globs.localhost_ref in
+  Xapi_observer.register ~__context ~self ~host ;
+  self
 
 let start_test_span () =
-  set ~uuid:"123" ~enabled:true () ;
-  let tracer = get_tracer ~name:"test_tracer" in
+  let tracer = get_tracer ~name:"test-observer" in
   let span = Tracer.start ~tracer ~name:"test_task" ~parent:None () in
-  set ~uuid:"123" ~enabled:false () ;
   span
 
 let start_test_trace () =
-  set ~uuid:"123" ~enabled:true () ;
-  let tracer = get_tracer ~name:"test_tracer" in
+  let tracer = get_tracer ~name:"test-observer" in
   let root =
     Tracer.start ~tracer ~name:"test_task" ~parent:None ()
     |> Result.value ~default:None
@@ -55,35 +145,193 @@ let start_test_trace () =
     |> Result.value ~default:None
   in
   let spans = [span2; span1; span3; span4; root] in
-  set ~uuid:"123" ~enabled:false () ;
   spans
 
-let test_hashtbl_leaks () =
-  let span = start_test_span () in
-  match span with
-  | Ok x ->
-      Alcotest.(check bool)
-        "Spans are collected in hashtable"
-        (Tracer.span_hashtbl_is_empty ())
-        false ;
-      Export.set_export_interval 0.2 ;
-      let _ = Tracer.finish x in
-      Unix.sleepf 0.2 ;
-      (* Wait for export to clear hashtbl *)
-      Alcotest.(check bool)
-        "Span export clears hashtable"
-        (Tracer.span_hashtbl_is_empty ())
-        true
-  | Error e ->
-      Alcotest.failf "Span start failed with %s" (Printexc.to_string e)
+let test_observer_create_and_destroy () =
+  let __context = Test_common.make_test_database () in
+  Xapi_DB.assert_x_observers ~__context 0 ;
+  TracerProvider.assert_x_observers ~__context 0 ;
 
-let raise_exn () = raise (Failure "Test exception message")
+  let name = "test-observer" in
+  let self = test_create ~__context () ~name_label:name in
+  Xapi_DB.assert_x_observers ~__context 1 ;
+  TracerProvider.assert_x_observers ~__context 1 ;
 
-let test_b () = raise_exn () + 1 (* non-tail to ensure stack entry created *)
+  Xapi_DB.assert_observer_disabled ~__context ~self ;
+  TracerProvider.assert_observer_disabled ~name ;
 
-let test_a () = test_b () + 1
+  Xapi_DB.assert_mandatory_attributes ~__context ~self ;
+  TracerProvider.assert_mandatory_attributes ~name ;
+
+  let name2 = "test-observer-2" in
+  let self2 = test_create ~__context ~name_label:name2 () in
+  Xapi_DB.assert_x_observers ~__context 2 ;
+  TracerProvider.assert_x_observers ~__context 2 ;
+
+  test_destroy ~__context ~self:self2 () ;
+  Xapi_DB.assert_x_observers ~__context 1 ;
+  TracerProvider.assert_x_observers ~__context 1 ;
+
+  test_destroy ~__context ~self () ;
+  Xapi_DB.assert_x_observers ~__context 0 ;
+  TracerProvider.assert_x_observers ~__context 0
+
+let test_hosts ~__context ~self =
+  let valid_host = !Xapi_globs.localhost_ref in
+  ( try Xapi_observer.set_hosts ~__context ~self ~value:[valid_host]
+    with e -> Alcotest.failf "Failed to set valid host"
+  ) ;
+
+  let invalid_host = Ref.null in
+  Alcotest.check_raises "Xapi_observer.set_hosts should fail on invalid host"
+    Api_errors.(
+      Server_error (invalid_value, ["host"; Ref.string_of invalid_host])
+    )
+    (fun () ->
+      Xapi_observer.set_hosts ~__context ~self ~value:[invalid_host] |> ignore
+    )
+
+let test_components ~__context ~self =
+  let valid_components = ["xapi"] in
+  List.iter
+    (fun x ->
+      try Xapi_observer.set_components ~__context ~self ~value:[x]
+      with e -> Alcotest.failf "Failed to set valid component"
+    )
+    valid_components ;
+
+  let invalid_component = "invalid-component" in
+  Alcotest.check_raises
+    "Xapi_observer.set_components should fail on invalid component"
+    Api_errors.(Server_error (invalid_value, ["component"; invalid_component]))
+    (fun () ->
+      Xapi_observer.set_components ~__context ~self ~value:[invalid_component]
+      |> ignore
+    )
+
+let test_endpoints ~__context ~self =
+  let valid_endpoints = ["bugtool"; "http://example.com:9411/api/v2/spans"] in
+  List.iter
+    (fun x ->
+      try Xapi_observer.set_endpoints ~__context ~self ~value:[x]
+      with e -> Alcotest.failf "Failed to set valid endpoint"
+    )
+    valid_endpoints
+
+let test_observer_valid_params () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context ~name_label:"test-observer" () in
+
+  test_hosts ~__context ~self ;
+  test_components ~__context ~self ;
+  test_endpoints ~__context ~self ;
+
+  test_destroy ~__context ~self ()
+
+let test_observer_endpoint () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context () in
+  let url = "http://example.com:9411/api/v2/spans" in
+  let endpoints = [url] in
+  Xapi_observer.set_endpoints ~__context ~self ~value:endpoints ;
+  Xapi_DB.check_endpoints ~__context ~self ~endpoints ;
+  TracerProvider.check_endpoints ~name:"test-observer" ~endpoints ;
+
+  let endpoints = ["bugtool"; url] in
+  Xapi_observer.set_endpoints ~__context ~self ~value:endpoints ;
+  Xapi_DB.check_endpoints ~__context ~self ~endpoints ;
+  TracerProvider.check_endpoints ~name:"test-observer" ~endpoints ;
+  test_destroy ~__context ~self ()
+
+let is_export_dir_empty () =
+  let log_dir = Sys.readdir test_trace_log_dir |> Array.map (fun x -> test_trace_log_dir ^ x) in
+  Array.length log_dir = 0
+
+let clear_export_dir () =
+  Sys.readdir test_trace_log_dir
+  |> Array.map (fun x -> test_trace_log_dir ^ x)
+  |> Array.iter (fun x -> Sys.remove x) ;
+  Alcotest.(check bool)
+    "log dir successfully cleared" true (is_export_dir_empty ())
+
+let verify_json_fields_and_values ~json =
+  let open Yojson.Basic.Util in
+  try
+    let tags = json |> member "tags" in
+    let _ = tags |> member "xs.pool.uuid" |> to_string in
+    let _ = tags |> member "xs.host.name" |> to_string in
+    let _ = tags |> member "xs.host.uuid" |> to_string in
+    let observer_name = tags |> member "xs.observer.name" |> to_string in
+    Alcotest.(check string)
+      "Observer name in trace json as expected" "test-observer" observer_name ;
+
+    let local_endpoint = json |> member "localEndpoint" in
+    let service_name = local_endpoint |> member "serviceName" |> to_string in
+    Alcotest.(check string)
+      "Service name in trace json as expected" "xapi" service_name ;
+
+    let _ = json |> member "duration" |> to_int in
+    let _ = json |> member "timestamp" |> to_int in
+
+    let name = json |> member "name" |> to_string in
+    Alcotest.(check string)
+      "Task name in trace json as expected" "test_task" name ;
+
+    let _ = json |> member "traceId" |> to_string in
+    let _ = json |> member "id" |> to_string in
+    ()
+  with e -> Alcotest.failf "%s" (Printexc.to_string e)
+
+let assert_exported_files_contains_expected_json_fields_and_values () =
+  let log_dir = Sys.readdir test_trace_log_dir |> Array.map (fun x -> test_trace_log_dir ^ x) in
+  Array.iter
+    (fun x ->
+      let json_file = Yojson.Basic.from_file x |> Yojson.Basic.Util.to_list in
+      List.iter (fun json -> verify_json_fields_and_values ~json) json_file
+    )
+    log_dir
+
+let test_file_export_writes () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context ~enabled:true () in
+  clear_export_dir () ;
+  ( try
+      let span = start_test_span () in
+      match span with
+      | Ok x -> (
+          let _ = Tracer.finish x in
+          Tracing.Export.Destination.flush_spans () ;
+          Alcotest.(check bool)
+            "tracing files written to disk when tracing enabled by default"
+            false (is_export_dir_empty ()) ;
+
+          assert_exported_files_contains_expected_json_fields_and_values () ;
+
+          clear_export_dir () ;
+
+          let span = start_test_span () in
+          Xapi_observer.set_enabled ~__context ~self ~value:false ;
+          Xapi_DB.assert_observer_disabled ~__context ~self ;
+          TracerProvider.assert_observer_disabled ~name:"test-observer" ;
+          match span with
+          | Ok x ->
+              let _ = Tracer.finish x in
+              Tracing.Export.Destination.flush_spans () ;
+              Alcotest.(check bool)
+                "tracing files not written when tracing disabled" true
+                (is_export_dir_empty ())
+          | Error e ->
+              raise e
+        )
+      | Error e ->
+          Alcotest.failf "Span start failed with %s" (Printexc.to_string e)
+    with e -> Alcotest.failf "Error: %s" (Printexc.to_string e)
+  ) ;
+  test_destroy ~__context ~self ()
 
 let test_all_spans_finish () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context () in
   let trace_spans = start_test_trace () in
   let active_spans, _ = Spans.dump () in
   let _ = List.map (fun span -> Tracer.finish span) trace_spans in
@@ -101,11 +349,53 @@ let test_all_spans_finish () =
     "All spans that are finished are moved to finished_spans" true result ;
   Alcotest.(check int)
     "traces with no spans are removed from the hashtable" 0
-    (Hashtbl.length remaining_spans)
+    (Hashtbl.length remaining_spans) ;
+  test_destroy ~__context ~self ()
+
+let test_hashtbl_leaks () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context ~enabled:true () in
+  let span = start_test_span () in
+  ( match span with
+  | Ok x ->
+      Alcotest.(check bool)
+        "Spans are collected in span hashtable"
+        (Tracer.span_hashtbl_is_empty ())
+        false ;
+
+      let _ = Tracer.finish x in
+      Alcotest.(check bool)
+        "Span finish removes span from span hashtable"
+        (Tracer.span_hashtbl_is_empty ())
+        true ;
+      Alcotest.(check bool)
+        "Span finish adds span to finished_spans hashtable"
+        (Tracer.finished_span_hashtbl_is_empty ())
+        false ;
+
+      Tracing.Export.Destination.flush_spans () ;
+      Alcotest.(check bool)
+        "Span export clears finished_spans hashtable"
+        (Tracer.finished_span_hashtbl_is_empty ())
+        true
+  | Error e ->
+      Alcotest.failf "Span start failed with %s" (Printexc.to_string e)
+  ) ;
+  clear_export_dir () ;
+  test_destroy ~__context ~self () ;
+  TracerProvider.assert_x_observers ~__context 0
+
+let raise_exn () = raise (Failure "Test exception message")
+
+let test_b () = raise_exn () + 1 (* non-tail to ensure stack entry created *)
+
+let test_a () = test_b () + 1
 
 let test_tracing_exn_backtraces () =
+  let __context = Test_common.make_test_database () in
+  let self = test_create ~__context ~enabled:true () in
   let span = start_test_span () in
-  match span with
+  ( match span with
   | Ok x -> (
     try
       let (_ : int) = test_a () in
@@ -134,6 +424,8 @@ let test_tracing_exn_backtraces () =
   )
   | Error e ->
       Alcotest.failf "Span start failed with %s" (Printexc.to_string e)
+  ) ;
+  test_destroy ~__context ~self ()
 
 let test_attribute_validation () =
   let good_attributes =
@@ -187,10 +479,19 @@ let test_attribute_validation () =
 
 let test =
   [
-    ("test_hashtbl_leaks", `Quick, test_hashtbl_leaks)
-  ; ("test_tracing_exn_backtraces", `Quick, test_tracing_exn_backtraces)
+    ( "test_observer_create_and_destroy"
+    , `Quick
+    , test_observer_create_and_destroy
+    )
+  ; ("test_observer_valid_params", `Quick, test_observer_valid_params)
+  ; ("test_observer_endpoint", `Quick, test_observer_endpoint)
+  ; ("test_file_export", `Quick, test_file_export_writes)
   ; ("test_all_spans_finish", `Quick, test_all_spans_finish)
+  ; ("test_hashtbl_leaks", `Quick, test_hashtbl_leaks)
+  ; ("test_tracing_exn_backtraces", `Quick, test_tracing_exn_backtraces)
   ; ("test_attribute_validation", `Quick, test_attribute_validation)
   ]
 
-let () = Alcotest.run "Tracing" [("Tracing lifetime", test)]
+let () =
+  Suite_init.harness_init () ;
+  Alcotest.run "Tracing" [("Tracing lifetime", test)]
