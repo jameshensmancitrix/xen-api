@@ -708,3 +708,32 @@ let xenstore_encoded_entry_size_bytes key value =
      hence the `char_max_encoded_length` table above to determine the largest encoding among the two.
   *)
   entry_overhead + str_max_encoded_length key + str_max_encoded_length value
+
+let traceparent_of_dbg dbg =
+  let tracing =
+    match String.split_on_char '\x00' dbg with
+    | [_dbg; tracing] ->
+        Tracing.Span.of_string tracing
+    | _ ->
+        None
+  in
+  let traceparent =
+    Option.map
+      (fun span ->
+        let context = Tracing.Span.get_context span in
+        let traceparent = Tracing.SpanContext.to_traceparent context in
+        ("traceparent", traceparent)
+      )
+      tracing
+  in
+  Option.to_list traceparent
+
+let trace_dbg_of_traceparent name dbg traceparent =
+  let open Tracing in
+  let tracer = get_tracer ~name in
+  match Tracing.SpanContext.of_traceparent traceparent with
+  | None ->
+      dbg
+  | Some context ->
+      Tracing.Tracer.span_of_span_context tracer context name |> Span.to_string
+      |> fun tracing -> dbg ^ "\x00" ^ tracing

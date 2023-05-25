@@ -2696,11 +2696,13 @@ and perform_exn ?subtask ?result (op : operation) (t : Xenops_task.task_handle)
               in
               let headers =
                 Cohttp.Header.of_list
-                  [
-                    Cohttp.Cookie.Cookie_hdr.serialize cookies
-                  ; ("Connection", "keep-alive")
-                  ; ("User-agent", "xenopsd")
-                  ]
+                  ([
+                     Cohttp.Cookie.Cookie_hdr.serialize cookies
+                   ; ("Connection", "keep-alive")
+                   ; ("User-agent", "xenopsd")
+                   ]
+                  @ Xenops_utils.traceparent_of_dbg dbg
+                  )
               in
               let request =
                 Cohttp.Request.make ~meth:`PUT ~version:`HTTP_1_1 ~headers url
@@ -3628,11 +3630,17 @@ module VM = struct
     let module Request = Cohttp.Request.Make (Cohttp_posix_io.Unbuffered_IO) in
     let module Response = Cohttp.Response.Make (Cohttp_posix_io.Unbuffered_IO) in
     let dbg = List.assoc "dbg" cookies in
+    let traceparent = List.assoc_opt "traceparent" cookies in
     let memory_limit = List.assoc "memory_limit" cookies |> Int64.of_string in
     let handshake = List.assoc_opt cookie_mem_migration cookies in
     let compressed_memory = get_compression cookies in
     Debug.with_thread_associated dbg
       (fun () ->
+        let dbg =
+          Option.fold ~none:dbg
+            ~some:(Xenops_utils.trace_dbg_of_traceparent "recieve_mem" dbg)
+            traceparent
+        in
         let id, final_id =
           (* The URI is /service/xenops/memory/id *)
           let bits = Astring.String.cuts ~sep:"/" (Uri.path uri) in

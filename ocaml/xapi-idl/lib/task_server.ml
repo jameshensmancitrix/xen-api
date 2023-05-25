@@ -127,12 +127,12 @@ functor
 
     (* [add dbg f] creates a fresh [t], registers and returns it *)
     let add tasks dbg (f : task_handle -> Interface.Task.async_result option) =
-      let dbg, tracing =
+      let tracing =
         match String.split_on_char '\x00' dbg with
-        | [dbg; tracing] ->
-            (dbg, Some tracing)
+        | [_dbg; tracing] ->
+            Some tracing
         | _ ->
-            (dbg, None)
+            None
       in
       let t =
         {
